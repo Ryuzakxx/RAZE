@@ -41,6 +41,8 @@ class ModeSelectWindow(QWidget):
         self.setFixedSize(640, 500)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self._drag_pos = None
+        self._player = None   # guard: inizializzato solo in _load_video
+        self._ao = None
         self._build()
         self._load_video()
 
@@ -62,13 +64,16 @@ class ModeSelectWindow(QWidget):
         bl.addWidget(t)
         bl.addStretch()
         cb = QPushButton("×")
-        cb.setStyleSheet(f"QPushButton{{background:transparent;color:{C['mid']};border:none;font-size:14px;}} QPushButton:hover{{color:{C['hi']};}}")
+        cb.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{C['mid']};border:none;font-size:14px;}}"
+            f"QPushButton:hover{{color:{C['hi']};}}"
+        )
         cb.setFixedSize(28, 28)
         cb.clicked.connect(self.close)
         bl.addWidget(cb)
         lay.addWidget(bar)
 
-        # Video
+        # Video placeholder / widget
         vid_wrap = QWidget()
         vid_wrap.setFixedHeight(190)
         vid_wrap.setStyleSheet(f"background:{C['bg']}; border-bottom:1px solid {C['border']};")
@@ -78,7 +83,7 @@ class ModeSelectWindow(QWidget):
         self.vid.setStyleSheet(f"background:{C['bg']};")
         vl.addWidget(self.vid)
         self.vid_ph = QLabel(
-            f"<pre style='color:{C['dim']}; font-size:12px;'>"
+            f"<pre style=\'color:{C['dim']}; font-size:12px;\'>"
             "  ██████  ███  ███ \n"
             " ██    ██ ████████ \n"
             " ██████   ████████ \n"
@@ -100,10 +105,11 @@ class ModeSelectWindow(QWidget):
         theme_row.addWidget(theme_lbl)
 
         self._theme_btns = {}
+        current = C["name"]
         for name in THEMES:
             b = QPushButton(name.upper())
             b.setObjectName("theme_btn")
-            b.setProperty("active", "true" if name == "white" else "false")
+            b.setProperty("active", "true" if name == current else "false")
             b.clicked.connect(lambda checked, n=name: self._set_theme(n))
             theme_row.addWidget(b)
             self._theme_btns[name] = b
@@ -139,32 +145,70 @@ class ModeSelectWindow(QWidget):
 
     def _set_theme(self, name: str):
         set_theme(name)
+        C = get()
+        # Aggiorna stylesheet globale
+        self.setStyleSheet(_make_ss(C))
+        # Aggiorna stato active dei pulsanti tema
         for n, b in self._theme_btns.items():
             b.setProperty("active", "true" if n == name else "false")
             b.style().unpolish(b)
             b.style().polish(b)
-        C = get()
-        self.setStyleSheet(_make_ss(C))
+            b.update()
+        # Riavvia il video solo se il player è già inizializzato
+        if self._player is not None:
+            self._restart_video()
 
     def _load_video(self):
-        path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets", "raze_white.mp4"))
+        path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "assets", "raze_white.mp4")
+        )
         if not os.path.exists(path):
             self.vid.hide()
             self.vid_ph.show()
             return
-        self.player = QMediaPlayer(self)
-        self.ao = QAudioOutput(self)
-        self.ao.setVolume(0)
-        self.player.setAudioOutput(self.ao)
-        self.player.setVideoOutput(self.vid)
-        self.player.setSource(QUrl.fromLocalFile(path))
-        self.player.mediaStatusChanged.connect(lambda s: (
-            self.player.setPosition(0) or self.player.play()
-            if s == QMediaPlayer.MediaStatus.EndOfMedia else None
-        ))
-        self.player.play()
+        try:
+            self._player = QMediaPlayer(self)
+            self._ao = QAudioOutput(self)
+            self._ao.setVolume(0)
+            self._player.setAudioOutput(self._ao)
+            self._player.setVideoOutput(self.vid)
+            self._player.mediaStatusChanged.connect(self._on_media)
+            self._player.setSource(QUrl.fromLocalFile(path))
+            self._player.play()
+        except Exception as e:
+            print(f"[RAZE] Video error: {e}")
+            self._player = None
+            self.vid.hide()
+            self.vid_ph.show()
+
+    def _restart_video(self):
+        """Riavvia il video in sicurezza dopo cambio tema."""
+        if self._player is None:
+            return
+        try:
+            self._player.stop()
+            self._player.setPosition(0)
+            self._player.play()
+        except Exception as e:
+            print(f"[RAZE] Video restart error: {e}")
+
+    def _on_media(self, s):
+        if self._player is None:
+            return
+        if s == QMediaPlayer.MediaStatus.EndOfMedia:
+            try:
+                self._player.setPosition(0)
+                self._player.play()
+            except Exception:
+                pass
 
     def _select(self, mode):
+        # Ferma il player prima di chiudere per evitare crash su distruzione
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
         self.mode_selected.emit(mode)
         self.close()
 
@@ -179,3 +223,11 @@ class ModeSelectWindow(QWidget):
 
     def mouseReleaseEvent(self, e):
         self._drag_pos = None
+
+    def closeEvent(self, e):
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+        super().closeEvent(e)
