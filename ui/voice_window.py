@@ -504,13 +504,15 @@ class VoiceWindow(QMainWindow):
         if self._closing:
             return
         self._set_thinking(False)
-        self.transcript_lbl.setText(text[:100] + ("..." if len(text) > 100 else ""))
+        # Non mostrare il testo della risposta durante SPEAKING
+        self.transcript_lbl.setText("")
         self._set_status("SPEAKING")
         self._statusbar.inc_messages()
         self._tts.speak(text)
 
     def _on_tts_done(self):
         self._busy = False
+        self.transcript_lbl.setText("")
         self._set_status("LISTENING")
         QTimer.singleShot(500, self._listen)
 
