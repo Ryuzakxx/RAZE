@@ -9,10 +9,12 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTextEdit, QLineEdit, QPushButton, QFrame
 )
-from PyQt6.QtCore    import Qt, QThread, pyqtSignal, QTimer, QUrl
-from PyQt6.QtGui     import QFontDatabase, QFont
-from PyQt6.QtMultimedia         import QMediaPlayer, QAudioOutput
-from PyQt6.QtMultimediaWidgets  import QVideoWidget
+from PyQt6.QtCore  import Qt, QThread, pyqtSignal, QTimer, QUrl
+from PyQt6.QtGui   import (
+    QFontDatabase, QTextCursor, QTextCharFormat, QColor, QFont
+)
+from PyQt6.QtMultimedia        import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from ui.theme   import get
 from ui.widgets import StatusBar
@@ -23,32 +25,45 @@ except ImportError:
     _psutil = None
 
 
-# ── Registra Space Mono una volta sola ─────────────────────────────────────────
+# ── Registra Space Mono ────────────────────────────────────────────────────────
 
 def _register_fonts():
-    base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
+    base = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "assets")
+    )
     for fname in (
         "SpaceMono-Regular.ttf",
         "SpaceMono-Bold.ttf",
         "SpaceMono-Italic.ttf",
         "SpaceMono-BoldItalic.ttf",
     ):
-        path = os.path.join(base, fname)
-        if os.path.exists(path):
-            QFontDatabase.addApplicationFont(path)
+        p = os.path.join(base, fname)
+        if os.path.exists(p):
+            QFontDatabase.addApplicationFont(p)
 
 _register_fonts()
-_FONT = "'Space Mono', 'Courier New', monospace"
+_FONT_FAMILY = "Space Mono"
+_FONT_FALLBACK = "Courier New"
 
 
-# ── Stylesheet ─────────────────────────────────────────────────────────────────
+def _mono(size: int = 12, bold: bool = False) -> QFont:
+    f = QFont(_FONT_FAMILY)
+    if not f.exactMatch():
+        f = QFont(_FONT_FALLBACK)
+    f.setPixelSize(size)
+    f.setBold(bold)
+    return f
+
+
+# ── Stylesheet (solo per widget non-log) ───────────────────────────────────────
 
 def _ss(C):
+    fm = f"'{_FONT_FAMILY}', '{_FONT_FALLBACK}', monospace"
     return f"""
 * {{
     background-color: {C['bg']};
     color: {C['mid']};
-    font-family: {_FONT};
+    font-family: {fm};
     font-size: 12px;
     border: none;
     outline: none;
@@ -60,85 +75,46 @@ QFrame#cell {{
 QTextEdit#log {{
     background-color: {C['bg']};
     color: {C['hi']};
-    font-family: {_FONT};
+    font-family: {fm};
     font-size: 12px;
     padding: 14px;
     border: none;
-    selection-background-color: {C['hi']};
-    selection-color: {C['bg']};
 }}
 QLineEdit#inp {{
     background-color: {C['bg']};
     color: {C['hi']};
-    font-family: {_FONT};
+    font-family: {fm};
     font-size: 13px;
     padding: 10px 14px;
     border: none;
     border-top: 1px solid {C['border']};
 }}
-QLineEdit#inp:focus {{
-    border-top: 1px solid {C['hi']};
-}}
+QLineEdit#inp:focus {{ border-top: 1px solid {C['hi']}; }}
 QPushButton#btn {{
-    background: transparent;
-    color: {C['dim']};
-    font-family: {_FONT};
-    font-size: 9px;
-    letter-spacing: 1px;
-    padding: 3px 8px;
-    border: 1px solid {C['border']};
+    background: transparent; color: {C['dim']};
+    font-family: {fm}; font-size: 9px; letter-spacing: 1px;
+    padding: 3px 8px; border: 1px solid {C['border']};
 }}
-QPushButton#btn:hover {{
-    color: {C['hi']};
-    border: 1px solid {C['hi']};
-}}
+QPushButton#btn:hover {{ color: {C['hi']}; border: 1px solid {C['hi']}; }}
 QPushButton#send_btn {{
-    background: transparent;
-    color: {C['hi']};
-    font-family: {_FONT};
-    font-size: 10px;
-    letter-spacing: 3px;
-    padding: 10px 22px;
-    border: 1px solid {C['hi']};
-    min-width: 80px;
+    background: transparent; color: {C['hi']};
+    font-family: {fm}; font-size: 10px; letter-spacing: 3px;
+    padding: 10px 22px; border: 1px solid {C['hi']}; min-width: 80px;
 }}
-QPushButton#send_btn:hover {{
-    background: {C['hi']};
-    color: {C['bg']};
-}}
+QPushButton#send_btn:hover {{ background: {C['hi']}; color: {C['bg']}; }}
 QPushButton#send_btn:pressed {{
-    background: {C['mid']};
-    border-color: {C['mid']};
-    color: {C['bg']};
+    background: {C['mid']}; border-color: {C['mid']}; color: {C['bg']};
 }}
 QPushButton#back_btn {{
-    background: transparent;
-    color: {C['dim']};
-    font-family: {_FONT};
-    font-size: 9px;
-    letter-spacing: 2px;
-    padding: 3px 10px;
-    border: 1px solid {C['border']};
+    background: transparent; color: {C['dim']};
+    font-family: {fm}; font-size: 9px; letter-spacing: 2px;
+    padding: 3px 10px; border: 1px solid {C['border']};
 }}
-QPushButton#back_btn:hover {{
-    color: {C['mid']};
-    border-color: {C['mid']};
-}}
-QScrollBar:vertical {{
-    background: {C['bg']};
-    width: 3px;
-    margin: 0;
-}}
-QScrollBar::handle:vertical {{
-    background: {C['dim']};
-    min-height: 20px;
-}}
-QScrollBar::handle:vertical:hover {{
-    background: {C['hi']};
-}}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-    height: 0px;
-}}
+QPushButton#back_btn:hover {{ color: {C['mid']}; border-color: {C['mid']}; }}
+QScrollBar:vertical {{ background: {C['bg']}; width: 3px; margin: 0; }}
+QScrollBar::handle:vertical {{ background: {C['dim']}; min-height: 20px; }}
+QScrollBar::handle:vertical:hover {{ background: {C['hi']}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 """
 
 
@@ -161,67 +137,100 @@ class WorkerThread(QThread):
             self.error_occurred.emit(str(e))
 
 
-# ── Typewriter — scrive direttamente nel QTextEdit ────────────────────────────
-#
-# LOGICA:
-#   • _on_resp() fa append() del PREFISSO in una riga dedicata, poi
-#     avvia il timer.
-#   • Ogni tick sostituisce solo il CONTENUTO dell'ultima riga, senza
-#     toccare le righe precedenti → nessun teletrasporto.
-#   • "Sostituisce l'ultima riga" = seleziona l'intero ultimo blocco e
-#     reinserisce prefix + testo parziale.
+# ── Log writer — usa QTextCursor plain-text, NIENTE insertHtml ────────────────
 
-class TypewriterInLog:
-    def __init__(self, log_widget: QTextEdit, theme: dict):
-        self._log        = log_widget
-        self.C           = theme
-        self._full_text  = ""
+class LogWriter:
+    def __init__(self, log: QTextEdit, C: dict):
+        self._log = log
+        self.C    = C
+        self._font_size = 12
+
+    def _fmt(self, hex_color: str, bold: bool = False) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(hex_color))
+        f = QFont(_FONT_FAMILY)
+        if not f.exactMatch():
+            f = QFont(_FONT_FALLBACK)
+        f.setPixelSize(self._font_size)
+        f.setBold(bold)
+        fmt.setFont(f)
+        return fmt
+
+    def append_line(self, segments: list[tuple[str, str, bool]]) -> None:
+        doc = self._log.document()
+        cur = QTextCursor(doc)
+        cur.movePosition(QTextCursor.MoveOperation.End)
+        if not doc.isEmpty():
+            cur.insertBlock()
+        for text, color, bold in segments:
+            cur.insertText(text, self._fmt(color, bold))
+        self._scroll()
+
+    def start_typewriter_line(
+        self, prefix_segments: list[tuple[str, str, bool]]
+    ) -> int:
+        doc = self._log.document()
+        cur = QTextCursor(doc)
+        cur.movePosition(QTextCursor.MoveOperation.End)
+        if not doc.isEmpty():
+            cur.insertBlock()
+        for text, color, bold in prefix_segments:
+            cur.insertText(text, self._fmt(color, bold))
+        pos = cur.position()
+        self._scroll()
+        return pos
+
+    def overwrite_from(self, anchor: int, new_text: str, color: str) -> None:
+        doc = self._log.document()
+        cur = QTextCursor(doc)
+        cur.setPosition(anchor)
+        cur.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+        cur.insertText(new_text, self._fmt(color))
+        self._scroll()
+
+    def _scroll(self):
+        sb = self._log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+
+class Typewriter:
+    def __init__(self, writer: LogWriter, C: dict):
+        self._w          = writer
+        self.C           = C
+        self._text       = ""
         self._pos        = 0
-        self._prefix_html = ""
+        self._anchor     = 0
         self._timer      = QTimer()
         self._timer.timeout.connect(self._tick)
         self.on_finished = None
 
-    def start(self, prefix_html: str, full_text: str, speed_ms: int = 14):
-        self._full_text   = full_text
-        self._pos         = 0
-        self._prefix_html = prefix_html
-        # Inserisce la riga iniziale vuota (solo il prefisso)
-        self._log.append(prefix_html)
-        self._scroll_bottom()
+    def start(
+        self,
+        prefix_segments: list[tuple[str, str, bool]],
+        full_text: str,
+        speed_ms: int = 14,
+    ):
+        self._text   = full_text
+        self._pos    = 0
+        self._anchor = self._w.start_typewriter_line(prefix_segments)
         self._timer.start(speed_ms)
 
     def stop(self):
         self._timer.stop()
 
     def _tick(self):
-        if self._pos < len(self._full_text):
+        if self._pos < len(self._text):
             self._pos += 1
-            visible = self._full_text[:self._pos]
-            # Sostituisce l'ultima riga del documento
-            cur = self._log.textCursor()
-            cur.movePosition(cur.MoveOperation.End)
-            cur.select(cur.SelectionType.BlockUnderCursor)
-            cur.insertHtml(
-                self._prefix_html +
-                f"<span style='"
-                f"color:{self.C['hi']};"
-                f"font-family:\"Space Mono\",\"Courier New\",monospace;"
-                f"font-size:12px;"
-                f"'>{visible}</span>"
+            self._w.overwrite_from(
+                self._anchor,
+                self._text[: self._pos],
+                self.C["hi"],
             )
-            self._scroll_bottom()
         else:
             self._timer.stop()
             if self.on_finished:
                 self.on_finished()
 
-    def _scroll_bottom(self):
-        sb = self._log.verticalScrollBar()
-        sb.setValue(sb.maximum())
-
-
-# ── Helper: cell header ────────────────────────────────────────────────────────
 
 def _cell_header(label: str, C: dict, right_widget=None) -> QWidget:
     hdr = QWidget()
@@ -243,8 +252,6 @@ def _cell_header(label: str, C: dict, right_widget=None) -> QWidget:
         hl.addWidget(right_widget)
     return hdr
 
-
-# ── Main Window ────────────────────────────────────────────────────────────────
 
 class RazeWindow(QMainWindow):
     back_requested = pyqtSignal()
@@ -269,7 +276,8 @@ class RazeWindow(QMainWindow):
         self._build()
         self._load_video()
 
-        self._tw = TypewriterInLog(self.log, self.C)
+        self._lw = LogWriter(self.log, self.C)
+        self._tw = Typewriter(self._lw, self.C)
         self._tw.on_finished = self._on_typewriter_done
 
         self._blink_timer = QTimer(self)
@@ -282,13 +290,9 @@ class RazeWindow(QMainWindow):
         self._sys_timer.start(2000)
         self._update_sys()
 
-        self._log_append(
-            f"<span style='color:{self.C['dim']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"RAZE // TEXT_MODE — ready. type a message and press ENTER.</span>"
-        )
-
-    # ── Layout ─────────────────────────────────────────────────────────────────
+        self._lw.append_line([
+            ("RAZE // TEXT_MODE — ready. type a message and press ENTER.", self.C["dim"], False)
+        ])
 
     def _build(self):
         root = QWidget()
@@ -296,7 +300,6 @@ class RazeWindow(QMainWindow):
         vlay = QVBoxLayout(root)
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
-
         vlay.addWidget(self._make_titlebar())
 
         body = QHBoxLayout()
@@ -339,16 +342,14 @@ class RazeWindow(QMainWindow):
         hl.addSpacing(12)
         title = QLabel("RAZE  //  TEXT_MODE")
         title.setStyleSheet(
-            f"color:{self.C['hi']}; font-size:10px; letter-spacing:5px; "
-            f"background:transparent; border:none;"
+            f"color:{self.C['hi']}; font-size:10px; letter-spacing:5px; background:transparent; border:none;"
         )
         hl.addWidget(title)
         hl.addStretch()
 
         self._status_title = QLabel("■ STANDBY")
         self._status_title.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:9px; letter-spacing:3px; "
-            f"background:transparent; border:none;"
+            f"color:{self.C['dim']}; font-size:9px; letter-spacing:3px; background:transparent; border:none;"
         )
         hl.addWidget(self._status_title)
         hl.addSpacing(16)
@@ -364,8 +365,7 @@ class RazeWindow(QMainWindow):
             b = QPushButton(sym)
             b.setFixedSize(26, 26)
             b.setStyleSheet(
-                f"QPushButton{{background:transparent;color:{self.C['dim']};border:none;"
-                f"font-size:13px;font-family:\"Space Mono\",\"Courier New\";}}"
+                f"QPushButton{{background:transparent;color:{self.C['dim']};border:none;font-size:13px;font-family:'{_FONT_FAMILY}','{_FONT_FALLBACK}';}}"
                 f"QPushButton:hover{{color:{self.C['hi']};background:{self.C['border']};}}"
             )
             b.clicked.connect(slot)
@@ -379,27 +379,25 @@ class RazeWindow(QMainWindow):
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
         vlay.addWidget(_cell_header("VISUAL_OUTPUT", self.C))
-        vid_container = QWidget()
-        vid_container.setStyleSheet(f"background:{self.C['bg']}; border:none;")
-        self.vid = QVideoWidget(vid_container)
+        vc = QWidget()
+        vc.setStyleSheet(f"background:{self.C['bg']}; border:none;")
+        self.vid = QVideoWidget(vc)
         self.vid.setStyleSheet(f"background:{self.C['bg']};")
-        self.vid_placeholder = QLabel(vid_container)
+        self.vid_placeholder = QLabel(vc)
         self.vid_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.vid_placeholder.setTextFormat(Qt.TextFormat.RichText)
         self.vid_placeholder.hide()
-        def _resize_vid(e):
-            self.vid.setGeometry(vid_container.rect())
-            self.vid_placeholder.setGeometry(vid_container.rect())
-        vid_container.resizeEvent = _resize_vid
-        vlay.addWidget(vid_container, stretch=1)
+        def _r(e):
+            self.vid.setGeometry(vc.rect())
+            self.vid_placeholder.setGeometry(vc.rect())
+        vc.resizeEvent = _r
+        vlay.addWidget(vc, stretch=1)
         return cell
 
     def _make_sys_cell(self):
         cell = QFrame()
         cell.setObjectName("cell")
         cell.setStyleSheet(
-            f"QFrame#cell{{background:{self.C['bg1']}; "
-            f"border:1px solid {self.C['border']}; border-top:none;}}"
+            f"QFrame#cell{{background:{self.C['bg1']}; border:1px solid {self.C['border']}; border-top:none;}}"
         )
         vlay = QVBoxLayout(cell)
         vlay.setContentsMargins(0, 0, 0, 0)
@@ -413,21 +411,19 @@ class RazeWindow(QMainWindow):
         self._sys_labels = {}
         for key, val in [
             ("STATUS", "STANDBY"), ("MODE", "TEXT"),
-            ("THEME",  self.C["name"].upper()), ("MSGS", "0"),
+            ("THEME", self.C["name"].upper()), ("MSGS", "0"),
             ("CPU", "—"), ("RAM", "—"), ("TIME", "—"),
         ]:
             row = QHBoxLayout()
             row.setSpacing(0)
             k = QLabel(key)
             k.setStyleSheet(
-                f"color:{self.C['dim']}; font-size:9px; letter-spacing:2px; "
-                f"background:transparent; border:none;"
+                f"color:{self.C['dim']}; font-size:9px; letter-spacing:2px; background:transparent; border:none;"
             )
             v = QLabel(val)
             v.setAlignment(Qt.AlignmentFlag.AlignRight)
             v.setStyleSheet(
-                f"color:{self.C['mid']}; font-size:9px; letter-spacing:1px; "
-                f"background:transparent; border:none;"
+                f"color:{self.C['mid']}; font-size:9px; letter-spacing:1px; background:transparent; border:none;"
             )
             row.addWidget(k)
             row.addStretch()
@@ -442,8 +438,7 @@ class RazeWindow(QMainWindow):
         cell = QFrame()
         cell.setObjectName("cell")
         cell.setStyleSheet(
-            f"QFrame#cell{{background:{self.C['bg']}; "
-            f"border:1px solid {self.C['border']}; border-left:none;}}"
+            f"QFrame#cell{{background:{self.C['bg']}; border:1px solid {self.C['border']}; border-left:none;}}"
         )
         vlay = QVBoxLayout(cell)
         vlay.setContentsMargins(0, 0, 0, 0)
@@ -458,6 +453,7 @@ class RazeWindow(QMainWindow):
         self.log = QTextEdit()
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
+        self.log.setFont(_mono(12))
         vlay.addWidget(self.log, stretch=1)
 
         sep = QWidget()
@@ -474,14 +470,13 @@ class RazeWindow(QMainWindow):
 
         prompt_lbl = QLabel("  >_  ")
         prompt_lbl.setStyleSheet(
-            f"color:{self.C['hi']}; font-size:13px; "
-            f"background:{self.C['bg1']}; border:none; "
-            f"border-right:1px solid {self.C['border']}; padding:0 8px;"
+            f"color:{self.C['hi']}; font-size:13px; background:{self.C['bg1']}; border:none; border-right:1px solid {self.C['border']}; padding:0 8px;"
         )
         ib.addWidget(prompt_lbl)
 
         self.inp = QLineEdit()
         self.inp.setObjectName("inp")
+        self.inp.setFont(_mono(13))
         self.inp.setPlaceholderText("insert command...")
         self.inp.returnPressed.connect(self._send)
         ib.addWidget(self.inp, stretch=1)
@@ -500,8 +495,6 @@ class RazeWindow(QMainWindow):
         d.setStyleSheet(f"background:{self.C['border']}; border:none;")
         return d
 
-    # ── Video ──────────────────────────────────────────────────────────────────
-
     def _load_video(self):
         base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
         self._vid_idle     = os.path.join(base, "raze_white.mp4")
@@ -509,12 +502,7 @@ class RazeWindow(QMainWindow):
         if not os.path.exists(self._vid_idle):
             self.vid.hide()
             self.vid_placeholder.show()
-            self.vid_placeholder.setText(
-                f"<pre style='color:{self.C['dim']};font-size:10px;line-height:1.6;'>"
-                "  ██████  ███  ███ \n ██    ██ ████████ \n"
-                " ██████   ████████ \n ██   ██  ████████ \n"
-                " ██   ██  ██  ████ </pre>"
-            )
+            self.vid_placeholder.setText("[ NO VIDEO ]")
             return
         try:
             self._player = QMediaPlayer(self)
@@ -554,8 +542,6 @@ class RazeWindow(QMainWindow):
     def _set_thinking(self, on: bool):
         self._play_video(self._vid_thinking if on else self._vid_idle)
 
-    # ── Chat ───────────────────────────────────────────────────────────────────
-
     def _send(self):
         text = self.inp.text().strip()
         if not text or self._closing:
@@ -564,16 +550,10 @@ class RazeWindow(QMainWindow):
         self.inp.setEnabled(False)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
 
-        # ── MESSAGGIO UTENTE ─────────────────────────────────────────────────
-        # Usa _log_append: aggiunge una riga NUOVA e non la tocca mai più.
-        self._log_append(
-            f"<span style='color:{self.C['dim']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"[{ts}]&nbsp;</span>"
-            f"<span style='color:{self.C['mid']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"&gt;&nbsp;{text}</span>"
-        )
+        self._lw.append_line([
+            (f"[{ts}] ", self.C["dim"], False),
+            (f"> {text}", self.C["mid"], False),
+        ])
 
         self._set_status("PROCESSING")
         self._set_sys("STATUS", "PROCESSING")
@@ -598,14 +578,10 @@ class RazeWindow(QMainWindow):
         self._statusbar.inc_messages()
         ts = datetime.datetime.now().strftime("%H:%M:%S")
 
-        # prefisso in HTML: solo timestamp + label RAZE, niente testo risposta
-        prefix = (
-            f"<span style='color:{self.C['dim']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"[{ts}]&nbsp;RAZE&gt;&nbsp;</span>"
+        self._tw.start(
+            prefix_segments=[(f"[{ts}] RAZE> ", self.C["dim"], False)],
+            full_text=text,
         )
-        # Il typewriter aggiunge la riga, poi la aggiorna in-place
-        self._tw.start(prefix, text)
 
     def _on_typewriter_done(self):
         if self._closing:
@@ -618,35 +594,19 @@ class RazeWindow(QMainWindow):
             return
         self._set_thinking(False)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self._log_append(
-            f"<span style='color:{self.C['dim']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"[{ts}]&nbsp;</span>"
-            f"<span style='color:{self.C['mid']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"ERR: {text}</span>"
-        )
+        self._lw.append_line([
+            (f"[{ts}] ", self.C["dim"], False),
+            (f"ERR: {err}", self.C["mid"], False),
+        ])
         self._set_status("ERROR")
         self._set_sys("STATUS", "ERROR")
-
-    def _log_append(self, html):
-        """Aggiunge una riga e scrolla in fondo. NON tocca righe esistenti."""
-        self.log.append(html)
-        sb = self.log.verticalScrollBar()
-        sb.setValue(sb.maximum())
 
     def _clear_log(self):
         self.log.clear()
         self._conv.clear()
         self._msg_count = 0
         self._set_sys("MSGS", "0")
-        self._log_append(
-            f"<span style='color:{self.C['dim']};"
-            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
-            f"// memory cleared — ready</span>"
-        )
-
-    # ── Status / sys ───────────────────────────────────────────────────────────
+        self._lw.append_line([("// memory cleared — ready", self.C["dim"], False)])
 
     def _set_status(self, text):
         self._status_title.setText(f"■ {text}")
@@ -659,7 +619,7 @@ class RazeWindow(QMainWindow):
     def _update_sys(self):
         if self._closing:
             return
-        self._set_sys("TIME",  datetime.datetime.now().strftime("%H:%M:%S"))
+        self._set_sys("TIME", datetime.datetime.now().strftime("%H:%M:%S"))
         self._set_sys("THEME", self.C["name"].upper())
         try:
             if _psutil is not None:
@@ -673,11 +633,7 @@ class RazeWindow(QMainWindow):
             return
         if "STANDBY" in self._status_title.text():
             self._blink_state = not self._blink_state
-            self._status_title.setText(
-                "■ STANDBY" if self._blink_state else "□ STANDBY"
-            )
-
-    # ── Navigazione ────────────────────────────────────────────────────────────
+            self._status_title.setText("■ STANDBY" if self._blink_state else "□ STANDBY")
 
     def _go_back(self):
         self._closing = True
@@ -693,8 +649,6 @@ class RazeWindow(QMainWindow):
                 pass
         self.back_requested.emit()
         self.close()
-
-    # ── Window chrome ──────────────────────────────────────────────────────────
 
     def closeEvent(self, e):
         self._closing = True
