@@ -4,10 +4,16 @@ Widget riutilizzabili: MicLevelBar, WaveformWidget, TypewriterLabel, StatusBar
 """
 
 import math
+import datetime
 import numpy as np
 from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import QPainter, QColor, QPen
+
+try:
+    import psutil as _psutil
+except ImportError:
+    _psutil = None
 
 
 # ── Mic Level Bar ─────────────────────────────────────────────────────────────
@@ -112,12 +118,14 @@ class StatusBar(QWidget):
         self._update()
 
     def _update(self):
-        import datetime, psutil
         now = datetime.datetime.now().strftime("%H:%M:%S")
         try:
-            cpu = psutil.cpu_percent(interval=None)
-            ram = psutil.virtual_memory().used / (1024**3)
-            sys_str = f"CPU:{cpu:.0f}%  RAM:{ram:.1f}GB"
+            if _psutil is not None:
+                cpu = _psutil.cpu_percent(interval=None)
+                ram = _psutil.virtual_memory().used / (1024**3)
+                sys_str = f"CPU:{cpu:.0f}%  RAM:{ram:.1f}GB"
+            else:
+                sys_str = "psutil N/A"
         except Exception:
             sys_str = ""
 
