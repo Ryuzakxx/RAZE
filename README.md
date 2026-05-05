@@ -14,7 +14,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-00d4aa?style=flat-square&logo=python&logoColor=white)
 ![PyQt6](https://img.shields.io/badge/PyQt6-UI-5c6bc0?style=flat-square)
 ![Whisper](https://img.shields.io/badge/Faster--Whisper-STT-ff6b35?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)
+![License](https://img.shields.io/badge/license-CC%20BY--NC%204.0-brightgreen?style=flat-square)
 
 </div>
 
@@ -69,6 +69,22 @@ RAZE/
 ```
 [██████████░░░░░░░░░░] v0.1-dev — work in progress
 ```
+
+---
+
+## `> LICENSE`
+
+Questo progetto è distribuito sotto licenza **[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)**.  
+
+Puoi liberamente clonare, modificare e condividere il codice, ma:
+
+- ✅ Devi sempre **citare l'autore originale**: `Ryuzakxx (Francesco Moretto)` con link a questo repo
+- ❌ **Non puoi** spacciarti per l'autore o rimuovere i crediti
+- ❌ **Non puoi** usarlo per scopi commerciali senza permesso scritto
+
+> © 2026 [Ryuzakxx](https://github.com/Ryuzakxx) — tutti i diritti riservati secondo i termini della licenza.
+
+---
 
 <div align="center">
 <sub>built with 🖤 by <a href="https://github.com/Ryuzakxx">Ryuzakxx</a></sub>
