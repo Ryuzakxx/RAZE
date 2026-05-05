@@ -11,7 +11,6 @@ def main():
     _wins = {}
 
     def _close_active():
-        """Chiude e distrugge qualsiasi finestra attiva (main o voice)."""
         for key in ("main", "voice"):
             w = _wins.pop(key, None)
             if w is not None:
@@ -30,7 +29,6 @@ def main():
         sel.show()
 
     def on_mode(mode: str):
-        # Chiudi il selettore
         sel = _wins.pop("sel", None)
         if sel is not None:
             try:
@@ -42,6 +40,7 @@ def main():
         if mode == "text":
             from ui.main_window import RazeWindow
             w = RazeWindow()
+            w.back_requested.connect(show_selector)   # ← torna al menu
             _wins["main"] = w
             w.show()
         elif mode == "voice":
