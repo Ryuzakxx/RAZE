@@ -200,6 +200,9 @@ class VoiceWindow(QMainWindow):
         self._tts = TTSEngine()
         self._tts.speech_finished.connect(self._on_tts_done)
 
+        self._player = None    # guard: inizializzato in _load_video
+        self._closing = False
+        self._worker = None
         self._build()
         self._load_video()
 
@@ -326,28 +329,42 @@ class VoiceWindow(QMainWindow):
                 " ██   ██  ██  ████ </pre>"
             )
             return
-        self.player = QMediaPlayer(self)
-        self.ao = QAudioOutput(self)
-        self.ao.setVolume(0)
-        self.player.setAudioOutput(self.ao)
-        self.player.setVideoOutput(self.vid)
-        self.player.mediaStatusChanged.connect(self._on_media)
-        self._play_video(self._vid_idle)
+        try:
+            self._player = QMediaPlayer(self)
+            self._ao = QAudioOutput(self)
+            self._ao.setVolume(0)
+            self._player.setAudioOutput(self._ao)
+            self._player.setVideoOutput(self.vid)
+            self._player.mediaStatusChanged.connect(self._on_media)
+            self._play_video(self._vid_idle)
+        except Exception as e:
+            print(f"[RAZE] Voice video init error: {e}")
+            self._player = None
+            self.vid.hide()
+            self.vid_ph.show()
 
     def _play_video(self, path):
+        if self._player is None:
+            return
         if not os.path.exists(path):
             path = self._vid_idle
-        self.player.setSource(QUrl.fromLocalFile(path))
-        self.player.play()
+        try:
+            self._player.setSource(QUrl.fromLocalFile(path))
+            self._player.play()
+        except Exception as e:
+            print(f"[RAZE] Video play error: {e}")
 
     def _on_media(self, s):
+        if self._player is None or self._closing:
+            return
         if s == QMediaPlayer.MediaStatus.EndOfMedia:
-            self.player.setPosition(0)
-            self.player.play()
+            try:
+                self._player.setPosition(0)
+                self._player.play()
+            except Exception:
+                pass
 
     def _set_thinking(self, on: bool):
-        if not hasattr(self, "player"):
-            return
         self._play_video(self._vid_thinking if on else self._vid_idle)
 
     def _on_mic_level(self, level: float):
@@ -405,6 +422,8 @@ class VoiceWindow(QMainWindow):
         self._worker.start()
 
     def _on_response(self, text: str):
+        if self._closing:
+            return
         print(f"[RAZE] Risposta: {text[:80]}")
         self._set_thinking(False)
         self.transcript_lbl.setText(text[:100] + ("..." if len(text) > 100 else ""))
@@ -473,7 +492,13 @@ class VoiceWindow(QMainWindow):
             self.status_lbl.setText(f"[ {sym} ]")
 
     def _back(self):
+        self._closing = True
         self._cleanup()
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
         self.back_requested.emit()
         self.close()
 
@@ -483,7 +508,17 @@ class VoiceWindow(QMainWindow):
             self._listener.stop()
 
     def closeEvent(self, e):
+        self._closing = True
+        if hasattr(self, "_blink_timer"):
+            self._blink_timer.stop()
         self._cleanup()
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.wait(3000)
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
         super().closeEvent(e)
 
     def mousePressEvent(self, e):
