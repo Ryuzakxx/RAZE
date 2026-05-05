@@ -1,17 +1,20 @@
 """
-ui/main_window.py - Modalità testo RAZE — redesign dashboard terminale
+ui/main_window.py
 """
+
+import os
+import datetime
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTextEdit, QLineEdit, QPushButton, QFrame
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtMultimediaWidgets import QVideoWidget
-import os
-import datetime
-from ui.theme import get
+from PyQt6.QtCore    import Qt, QThread, pyqtSignal, QTimer, QUrl
+from PyQt6.QtGui     import QFontDatabase, QFont
+from PyQt6.QtMultimedia         import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets  import QVideoWidget
+
+from ui.theme   import get
 from ui.widgets import StatusBar
 
 try:
@@ -20,12 +23,32 @@ except ImportError:
     _psutil = None
 
 
+# ── Registra Space Mono una volta sola ─────────────────────────────────────────
+
+def _register_fonts():
+    base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
+    for fname in (
+        "SpaceMono-Regular.ttf",
+        "SpaceMono-Bold.ttf",
+        "SpaceMono-Italic.ttf",
+        "SpaceMono-BoldItalic.ttf",
+    ):
+        path = os.path.join(base, fname)
+        if os.path.exists(path):
+            QFontDatabase.addApplicationFont(path)
+
+_register_fonts()
+_FONT = "'Space Mono', 'Courier New', monospace"
+
+
+# ── Stylesheet ─────────────────────────────────────────────────────────────────
+
 def _ss(C):
     return f"""
 * {{
     background-color: {C['bg']};
     color: {C['mid']};
-    font-family: 'Courier New', monospace;
+    font-family: {_FONT};
     font-size: 12px;
     border: none;
     outline: none;
@@ -37,9 +60,8 @@ QFrame#cell {{
 QTextEdit#log {{
     background-color: {C['bg']};
     color: {C['hi']};
-    font-family: 'Courier New', monospace;
+    font-family: {_FONT};
     font-size: 12px;
-    font-weight: 400;
     padding: 14px;
     border: none;
     selection-background-color: {C['hi']};
@@ -48,9 +70,8 @@ QTextEdit#log {{
 QLineEdit#inp {{
     background-color: {C['bg']};
     color: {C['hi']};
-    font-family: 'Courier New', monospace;
+    font-family: {_FONT};
     font-size: 13px;
-    font-weight: 400;
     padding: 10px 14px;
     border: none;
     border-top: 1px solid {C['border']};
@@ -61,7 +82,7 @@ QLineEdit#inp:focus {{
 QPushButton#btn {{
     background: transparent;
     color: {C['dim']};
-    font-family: 'Courier New', monospace;
+    font-family: {_FONT};
     font-size: 9px;
     letter-spacing: 1px;
     padding: 3px 8px;
@@ -74,7 +95,7 @@ QPushButton#btn:hover {{
 QPushButton#send_btn {{
     background: transparent;
     color: {C['hi']};
-    font-family: 'Courier New', monospace;
+    font-family: {_FONT};
     font-size: 10px;
     letter-spacing: 3px;
     padding: 10px 22px;
@@ -93,7 +114,7 @@ QPushButton#send_btn:pressed {{
 QPushButton#back_btn {{
     background: transparent;
     color: {C['dim']};
-    font-family: 'Courier New', monospace;
+    font-family: {_FONT};
     font-size: 9px;
     letter-spacing: 2px;
     padding: 3px 10px;
@@ -121,13 +142,13 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 """
 
 
-# ── Worker Thread ──────────────────────────────────────────────────────────────
+# ── Worker ─────────────────────────────────────────────────────────────────────
 
 class WorkerThread(QThread):
     response_ready = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, message: str, conversation=None):
+    def __init__(self, message, conversation=None):
         super().__init__()
         self.message      = message
         self.conversation = conversation
@@ -135,66 +156,72 @@ class WorkerThread(QThread):
     def run(self):
         try:
             from core.llm import query_raze
-            response = query_raze(self.message, self.conversation)
-            self.response_ready.emit(response)
+            self.response_ready.emit(query_raze(self.message, self.conversation))
         except Exception as e:
             self.error_occurred.emit(str(e))
 
 
-# ── Typewriter (scrive direttamente nel QTextEdit, non in un QLabel flottante) ─
+# ── Typewriter — scrive direttamente nel QTextEdit ────────────────────────────
+#
+# LOGICA:
+#   • _on_resp() fa append() del PREFISSO in una riga dedicata, poi
+#     avvia il timer.
+#   • Ogni tick sostituisce solo il CONTENUTO dell'ultima riga, senza
+#     toccare le righe precedenti → nessun teletrasporto.
+#   • "Sostituisce l'ultima riga" = seleziona l'intero ultimo blocco e
+#     reinserisce prefix + testo parziale.
 
 class TypewriterInLog:
-    """Scrive carattere per carattere nell'ultima riga del QTextEdit."""
-    finished = None  # signal-like: callback chiamata al termine
-
     def __init__(self, log_widget: QTextEdit, theme: dict):
-        self._log  = log_widget
-        self.C     = theme
-        self._text = ""
-        self._pos  = 0
-        self._prefix = ""
-        self._timer = QTimer()
+        self._log        = log_widget
+        self.C           = theme
+        self._full_text  = ""
+        self._pos        = 0
+        self._prefix_html = ""
+        self._timer      = QTimer()
         self._timer.timeout.connect(self._tick)
-        self.on_finished = None  # callable
+        self.on_finished = None
 
     def start(self, prefix_html: str, full_text: str, speed_ms: int = 14):
-        """
-        prefix_html: HTML già inserito nel log (timestamp + label)
-        full_text:   testo da scrivere carattere per carattere
-        """
-        self._text   = full_text
-        self._pos    = 0
-        self._prefix = prefix_html
-        # Inserisce la riga iniziale vuota (solo prefix)
+        self._full_text   = full_text
+        self._pos         = 0
+        self._prefix_html = prefix_html
+        # Inserisce la riga iniziale vuota (solo il prefisso)
         self._log.append(prefix_html)
+        self._scroll_bottom()
         self._timer.start(speed_ms)
 
     def stop(self):
         self._timer.stop()
 
     def _tick(self):
-        if self._pos < len(self._text):
+        if self._pos < len(self._full_text):
             self._pos += 1
-            # Aggiorna l'ULTIMA riga del documento
-            cursor = self._log.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            cursor.select(cursor.SelectionType.BlockUnderCursor)
-            visible = self._text[:self._pos]
-            cursor.insertHtml(
-                self._prefix +
-                f"<span style='color:{self.C['hi']};font-family:\"Courier New\",monospace;"
-                f"font-size:12px;'>{visible}</span>"
+            visible = self._full_text[:self._pos]
+            # Sostituisce l'ultima riga del documento
+            cur = self._log.textCursor()
+            cur.movePosition(cur.MoveOperation.End)
+            cur.select(cur.SelectionType.BlockUnderCursor)
+            cur.insertHtml(
+                self._prefix_html +
+                f"<span style='"
+                f"color:{self.C['hi']};"
+                f"font-family:\"Space Mono\",\"Courier New\",monospace;"
+                f"font-size:12px;"
+                f"'>{visible}</span>"
             )
-            self._log.verticalScrollBar().setValue(
-                self._log.verticalScrollBar().maximum()
-            )
+            self._scroll_bottom()
         else:
             self._timer.stop()
             if self.on_finished:
                 self.on_finished()
 
+    def _scroll_bottom(self):
+        sb = self._log.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
-# ── Cell header helper ─────────────────────────────────────────────────────────
+
+# ── Helper: cell header ────────────────────────────────────────────────────────
 
 def _cell_header(label: str, C: dict, right_widget=None) -> QWidget:
     hdr = QWidget()
@@ -234,25 +261,31 @@ class RazeWindow(QMainWindow):
         self._player    = None
         self._worker    = None
         self._closing   = False
-        from core.llm import Conversation
-        self._conv      = Conversation()
         self._msg_count = 0
+
+        from core.llm import Conversation
+        self._conv = Conversation()
+
         self._build()
         self._load_video()
-        # Typewriter integrato nel log
+
         self._tw = TypewriterInLog(self.log, self.C)
         self._tw.on_finished = self._on_typewriter_done
+
         self._blink_timer = QTimer(self)
         self._blink_timer.timeout.connect(self._blink)
         self._blink_timer.start(900)
         self._blink_state = True
+
         self._sys_timer = QTimer(self)
         self._sys_timer.timeout.connect(self._update_sys)
         self._sys_timer.start(2000)
         self._update_sys()
-        # Messaggio di benvenuto
-        self._log(
-            f"<span style='color:{self.C['dim']}'>RAZE // TEXT_MODE — ready. type a message and press ENTER.</span>"
+
+        self._log_append(
+            f"<span style='color:{self.C['dim']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"RAZE // TEXT_MODE — ready. type a message and press ENTER.</span>"
         )
 
     # ── Layout ─────────────────────────────────────────────────────────────────
@@ -275,7 +308,6 @@ class RazeWindow(QMainWindow):
         left_col.setSpacing(0)
         left_col.addWidget(self._make_video_cell(), stretch=3)
         left_col.addWidget(self._make_sys_cell(),   stretch=2)
-
         left_wrap = QWidget()
         left_wrap.setLayout(left_col)
 
@@ -321,7 +353,6 @@ class RazeWindow(QMainWindow):
         hl.addWidget(self._status_title)
         hl.addSpacing(16)
 
-        # Pulsante torna alla selezione modalità
         back_btn = QPushButton("◀ MODE")
         back_btn.setObjectName("back_btn")
         back_btn.setFixedHeight(22)
@@ -334,7 +365,7 @@ class RazeWindow(QMainWindow):
             b.setFixedSize(26, 26)
             b.setStyleSheet(
                 f"QPushButton{{background:transparent;color:{self.C['dim']};border:none;"
-                f"font-size:13px;font-family:'Courier New';}}"
+                f"font-size:13px;font-family:\"Space Mono\",\"Courier New\";}}"
                 f"QPushButton:hover{{color:{self.C['hi']};background:{self.C['border']};}}"
             )
             b.clicked.connect(slot)
@@ -380,16 +411,11 @@ class RazeWindow(QMainWindow):
         cl.setContentsMargins(14, 10, 14, 10)
         cl.setSpacing(7)
         self._sys_labels = {}
-        rows = [
-            ("STATUS", "STANDBY"),
-            ("MODE",   "TEXT"),
-            ("THEME",  self.C["name"].upper()),
-            ("MSGS",   "0"),
-            ("CPU",    "—"),
-            ("RAM",    "—"),
-            ("TIME",   "—"),
-        ]
-        for key, val in rows:
+        for key, val in [
+            ("STATUS", "STANDBY"), ("MODE", "TEXT"),
+            ("THEME",  self.C["name"].upper()), ("MSGS", "0"),
+            ("CPU", "—"), ("RAM", "—"), ("TIME", "—"),
+        ]:
             row = QHBoxLayout()
             row.setSpacing(0)
             k = QLabel(key)
@@ -429,7 +455,6 @@ class RazeWindow(QMainWindow):
         clr_btn.clicked.connect(self._clear_log)
         vlay.addWidget(_cell_header("OUTPUT_LOG", self.C, clr_btn))
 
-        # Log unico — il typewriter scrive qui dentro, niente QLabel separato
         self.log = QTextEdit()
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
@@ -449,7 +474,7 @@ class RazeWindow(QMainWindow):
 
         prompt_lbl = QLabel("  >_  ")
         prompt_lbl.setStyleSheet(
-            f"color:{self.C['hi']}; font-size:13px; font-weight:400; "
+            f"color:{self.C['hi']}; font-size:13px; "
             f"background:{self.C['bg1']}; border:none; "
             f"border-right:1px solid {self.C['border']}; padding:0 8px;"
         )
@@ -485,11 +510,9 @@ class RazeWindow(QMainWindow):
             self.vid.hide()
             self.vid_placeholder.show()
             self.vid_placeholder.setText(
-                f"<pre style='color:{self.C['dim']}; font-size:10px; line-height:1.6;'>"
-                "  ██████  ███  ███ \n"
-                " ██    ██ ████████ \n"
-                " ██████   ████████ \n"
-                " ██   ██  ████████ \n"
+                f"<pre style='color:{self.C['dim']};font-size:10px;line-height:1.6;'>"
+                "  ██████  ███  ███ \n ██    ██ ████████ \n"
+                " ██████   ████████ \n ██   ██  ████████ \n"
                 " ██   ██  ██  ████ </pre>"
             )
             return
@@ -540,14 +563,22 @@ class RazeWindow(QMainWindow):
         self.inp.clear()
         self.inp.setEnabled(False)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        # Messaggio utente
-        self._log(
-            f"<span style='color:{self.C['dim']}'>[{ts}]&nbsp;</span>"
-            f"<span style='color:{self.C['mid']}'>&gt;&nbsp;{text}</span>"
+
+        # ── MESSAGGIO UTENTE ─────────────────────────────────────────────────
+        # Usa _log_append: aggiunge una riga NUOVA e non la tocca mai più.
+        self._log_append(
+            f"<span style='color:{self.C['dim']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"[{ts}]&nbsp;</span>"
+            f"<span style='color:{self.C['mid']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"&gt;&nbsp;{text}</span>"
         )
+
         self._set_status("PROCESSING")
         self._set_sys("STATUS", "PROCESSING")
         self._set_thinking(True)
+
         self._worker = WorkerThread(text, self._conv)
         self._worker.response_ready.connect(self._on_resp)
         self._worker.error_occurred.connect(self._on_err)
@@ -566,10 +597,14 @@ class RazeWindow(QMainWindow):
         self._set_sys("MSGS", str(self._msg_count))
         self._statusbar.inc_messages()
         ts = datetime.datetime.now().strftime("%H:%M:%S")
+
+        # prefisso in HTML: solo timestamp + label RAZE, niente testo risposta
         prefix = (
-            f"<span style='color:{self.C['dim']}'>[{ts}] RAZE&nbsp;&gt;&nbsp;</span>"
+            f"<span style='color:{self.C['dim']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"[{ts}]&nbsp;RAZE&gt;&nbsp;</span>"
         )
-        # Typewriter direttamente nel log — nessun widget separato
+        # Il typewriter aggiunge la riga, poi la aggiorna in-place
         self._tw.start(prefix, text)
 
     def _on_typewriter_done(self):
@@ -583,26 +618,32 @@ class RazeWindow(QMainWindow):
             return
         self._set_thinking(False)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self._log(
-            f"<span style='color:{self.C['dim']}'>[{ts}]&nbsp;</span>"
-            f"<span style='color:{self.C['mid']}'>ERR: {err}</span>"
+        self._log_append(
+            f"<span style='color:{self.C['dim']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"[{ts}]&nbsp;</span>"
+            f"<span style='color:{self.C['mid']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"ERR: {text}</span>"
         )
         self._set_status("ERROR")
         self._set_sys("STATUS", "ERROR")
 
-    def _log(self, html):
+    def _log_append(self, html):
+        """Aggiunge una riga e scrolla in fondo. NON tocca righe esistenti."""
         self.log.append(html)
-        self.log.verticalScrollBar().setValue(
-            self.log.verticalScrollBar().maximum()
-        )
+        sb = self.log.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def _clear_log(self):
         self.log.clear()
         self._conv.clear()
         self._msg_count = 0
         self._set_sys("MSGS", "0")
-        self._log(
-            f"<span style='color:{self.C['dim']}'>// memory cleared — ready</span>"
+        self._log_append(
+            f"<span style='color:{self.C['dim']};"
+            f"font-family:\"Space Mono\",\"Courier New\",monospace;font-size:12px;'>"
+            f"// memory cleared — ready</span>"
         )
 
     # ── Status / sys ───────────────────────────────────────────────────────────
@@ -618,23 +659,19 @@ class RazeWindow(QMainWindow):
     def _update_sys(self):
         if self._closing:
             return
-        now = datetime.datetime.now().strftime("%H:%M:%S")
-        self._set_sys("TIME", now)
+        self._set_sys("TIME",  datetime.datetime.now().strftime("%H:%M:%S"))
         self._set_sys("THEME", self.C["name"].upper())
         try:
             if _psutil is not None:
-                cpu = _psutil.cpu_percent(interval=None)
-                ram = _psutil.virtual_memory().used / (1024 ** 3)
-                self._set_sys("CPU", f"{cpu:.0f}%")
-                self._set_sys("RAM", f"{ram:.1f} GB")
+                self._set_sys("CPU", f"{_psutil.cpu_percent(interval=None):.0f}%")
+                self._set_sys("RAM", f"{_psutil.virtual_memory().used/(1024**3):.1f} GB")
         except Exception:
             pass
 
     def _blink(self):
         if self._closing:
             return
-        txt = self._status_title.text()
-        if "STANDBY" in txt:
+        if "STANDBY" in self._status_title.text():
             self._blink_state = not self._blink_state
             self._status_title.setText(
                 "■ STANDBY" if self._blink_state else "□ STANDBY"
@@ -647,9 +684,9 @@ class RazeWindow(QMainWindow):
         self._blink_timer.stop()
         self._sys_timer.stop()
         self._tw.stop()
-        if self._worker is not None and self._worker.isRunning():
+        if self._worker and self._worker.isRunning():
             self._worker.wait(2000)
-        if self._player is not None:
+        if self._player:
             try:
                 self._player.stop()
             except Exception:
@@ -664,9 +701,9 @@ class RazeWindow(QMainWindow):
         self._blink_timer.stop()
         self._sys_timer.stop()
         self._tw.stop()
-        if self._worker is not None and self._worker.isRunning():
+        if self._worker and self._worker.isRunning():
             self._worker.wait(3000)
-        if self._player is not None:
+        if self._player:
             try:
                 self._player.stop()
             except Exception:
