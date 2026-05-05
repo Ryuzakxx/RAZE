@@ -7,18 +7,18 @@ import os
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QDialog, QComboBox, QSlider, QLineEdit
+    QLabel, QPushButton, QDialog, QComboBox, QSlider
 )
-from PyQt6.QtCore  import Qt, QUrl, QTimer, pyqtSignal
+from PyQt6.QtCore  import Qt, QUrl, QTimer, pyqtSignal, QThread
 from PyQt6.QtMultimedia        import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
-from PyQt6.QtGui   import QFontDatabase, QFont
+from PyQt6.QtGui   import QFontDatabase
 
 from ui.theme   import get
 from ui.widgets import MicLevelBar, WaveformWidget, StatusBar, MicMonitor
 
 
-# ── Font helper (identico a main_window) ────────────────────────────────────
+# ── Font ─────────────────────────────────────────────────────────────────────
 
 def _register_fonts():
     base = os.path.normpath(
@@ -71,21 +71,35 @@ QSlider::handle:horizontal {{
     margin: -5px 0; border-radius: 6px;
 }}
 QSlider::sub-page:horizontal {{ background: {C['hi']}; }}
-QLineEdit {{
-    background: {C['bg1']}; color: {C['hi']};
-    border: 1px solid {C['border']}; padding: 4px 8px;
-    font-family: {_FF}; font-size: 11px;
-}}
 """
 
 
-# ── Settings dialog ──────────────────────────────────────────────────────────
+# ── Model loader thread ───────────────────────────────────────────────────────
+
+class ModelLoaderThread(QThread):
+    finished = pyqtSignal()
+    error    = pyqtSignal(str)
+
+    def __init__(self, model_name: str = "small"):
+        super().__init__()
+        self._model_name = model_name
+
+    def run(self):
+        try:
+            from core.stt import preload_model
+            preload_model(self._model_name)
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ── Settings dialog (senza ElevenLabs) ───────────────────────────────────────
 
 class VoiceSettingsDialog(QDialog):
     def __init__(self, parent=None, cur_in=None, cur_out=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(460)
         C = get()
         self.setStyleSheet(_ss(C) + f"QDialog {{ background:{C['bg']}; border:1px solid {C['border']}; }}")
         self.C = C
@@ -137,13 +151,6 @@ class VoiceSettingsDialog(QDialog):
         row.addWidget(self.speed_slider)
         row.addWidget(self.speed_val)
         lay.addLayout(row)
-
-        lay.addWidget(self._lbl("ELEVENLABS // API KEY (vuoto = Piper offline)"))
-        self.api_inp = QLineEdit()
-        self.api_inp.setPlaceholderText("sk-...")
-        self.api_inp.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_inp.setText(os.environ.get("ELEVENLABS_API_KEY", ""))
-        lay.addWidget(self.api_inp)
 
         lay.addStretch()
         row2 = QHBoxLayout()
@@ -204,16 +211,15 @@ class VoiceSettingsDialog(QDialog):
     def _on_out(self, i):
         if 0 <= i < len(self._out_devs): self.selected_output = self._out_devs[i][0]
 
-    def get_input(self):   return self.selected_input
-    def get_output(self):  return self.selected_output
-    def get_speed(self):   return self.speed_slider.value()
-    def get_api_key(self): return self.api_inp.text().strip()
+    def get_input(self):  return self.selected_input
+    def get_output(self): return self.selected_output
+    def get_speed(self):  return self.speed_slider.value()
     def get_model(self):
         i = self.voice_combo.currentIndex()
         return self._models[i] if 0 <= i < len(self._models) else None
 
 
-# ── VoiceWindow ──────────────────────────────────────────────────────────────
+# ── VoiceWindow ───────────────────────────────────────────────────────────────
 
 class VoiceWindow(QMainWindow):
     back_requested = pyqtSignal()
@@ -235,6 +241,7 @@ class VoiceWindow(QMainWindow):
         self._old_listeners = []
         self._closing       = False
         self._player        = None
+        self._model_ready   = False
 
         from core.llm import Conversation
         self._conv = Conversation()
@@ -250,11 +257,14 @@ class VoiceWindow(QMainWindow):
         self._mic_monitor.level_updated.connect(self._on_mic_level)
         self._mic_monitor.start_monitoring()
 
-        from core.stt import preload_model
-        preload_model("small")
-        QTimer.singleShot(700, self._listen)
+        # Carica modello Whisper in background
+        self._set_status("CARICAMENTO MODELLO...")
+        self._loader = ModelLoaderThread("small")
+        self._loader.finished.connect(self._on_model_ready)
+        self._loader.error.connect(self._on_model_error)
+        self._loader.start()
 
-    # ── Build UI ─────────────────────────────────────────────────────────────
+    # ── Build UI ──────────────────────────────────────────────────────────────
 
     def _build(self):
         C = self.C
@@ -343,7 +353,7 @@ class VoiceWindow(QMainWindow):
         sl.setContentsMargins(16, 8, 16, 8)
         sl.setSpacing(4)
 
-        self.status_lbl = QLabel("[ INITIALIZING ]")
+        self.status_lbl = QLabel("[ CARICAMENTO MODELLO... ]")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_lbl.setStyleSheet(
             f"color:{C['hi']}; font-size:11px; letter-spacing:3px;"
@@ -422,6 +432,20 @@ class VoiceWindow(QMainWindow):
     def _set_thinking(self, on: bool):
         self._play_video(self._vid_thinking if on else self._vid_idle)
 
+    # ── Model loading ─────────────────────────────────────────────────────────
+
+    def _on_model_ready(self):
+        if self._closing:
+            return
+        self._model_ready = True
+        self._set_status("LISTENING")
+        self.transcript_lbl.setText("")
+        QTimer.singleShot(200, self._listen)
+
+    def _on_model_error(self, err: str):
+        self._set_status("MODEL_ERROR")
+        self.transcript_lbl.setText(err[:80])
+
     # ── Mic ───────────────────────────────────────────────────────────────────
 
     def _on_mic_level(self, level: float):
@@ -431,7 +455,7 @@ class VoiceWindow(QMainWindow):
     # ── STT loop ──────────────────────────────────────────────────────────────
 
     def _listen(self):
-        if self._busy or self._closing:
+        if self._busy or self._closing or not self._model_ready:
             return
         if self._listener and self._listener._running:
             return
@@ -513,9 +537,7 @@ class VoiceWindow(QMainWindow):
             self._mic_out = d.get_output()
             speed = d.get_speed()
             model = d.get_model()
-            api   = d.get_api_key()
             self._tts.set_speed(speed / 100.0)
-            self._tts.set_api_key(api)
             if self._mic_out is not None:
                 self._tts.set_output_device(self._mic_out)
             if model:
@@ -554,6 +576,8 @@ class VoiceWindow(QMainWindow):
     def _cleanup(self):
         if hasattr(self, "_blink_timer"):
             self._blink_timer.stop()
+        if hasattr(self, "_loader") and self._loader.isRunning():
+            self._loader.wait(3000)
         if hasattr(self, "_mic_monitor"):
             self._mic_monitor.stop_monitoring()
         if self._listener:
