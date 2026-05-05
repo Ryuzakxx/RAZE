@@ -1,6 +1,5 @@
 """
 ui/main_window.py - Modalità testo RAZE
-Stile terminale/hacker con scanlines, typewriter, status bar
 """
 
 from PyQt6.QtWidgets import (
@@ -73,7 +72,6 @@ class WorkerThread(QThread):
 
 
 class TypewriterLabel(QLabel):
-    """Label che appare carattere per carattere."""
     finished = pyqtSignal()
 
     def __init__(self, theme: dict):
@@ -90,6 +88,10 @@ class TypewriterLabel(QLabel):
         self.setText("")
         self._timer.start(speed_ms)
 
+    def stop_typing(self):
+        """Ferma l'animazione in sicurezza."""
+        self._timer.stop()
+
     def _tick(self):
         if self._pos < len(self._full_text):
             self._pos += 1
@@ -100,7 +102,6 @@ class TypewriterLabel(QLabel):
 
 
 class ScanlineOverlay(QWidget):
-    """Overlay scanlines stile CRT sopra il video."""
     def __init__(self, parent, theme: dict):
         super().__init__(parent)
         self.C = theme
@@ -114,8 +115,6 @@ class ScanlineOverlay(QWidget):
     def paintEvent(self, e):
         from PyQt6.QtGui import QPainter, QColor
         painter = QPainter(self)
-        painter.setOpacity(0.06)
-        glow = self.C.get("glow", "255,255,255")
         color = QColor(f"#{self.C['hi'][1:]}")
         color.setAlpha(15)
         painter.setPen(color)
@@ -136,10 +135,11 @@ class RazeWindow(QMainWindow):
         self.setStyleSheet(_ss(self.C))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self._drag_pos = None
+        self._player = None      # guard
+        self._worker = None      # guard
+        self._closing = False    # flag per evitare callback dopo chiusura
         from core.llm import Conversation
         self._conv = Conversation()
-        self._typewriter_queue = []
-        self._typing = False
         self._build()
         self._load_video()
         self._blink_timer = QTimer(self)
@@ -154,7 +154,6 @@ class RazeWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self._titlebar())
-
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
@@ -162,7 +161,6 @@ class RazeWindow(QMainWindow):
         body.addWidget(self._vline())
         body.addWidget(self._right(), stretch=3)
         lay.addLayout(body)
-
         self._statusbar = StatusBar(self.C)
         lay.addWidget(self._statusbar)
 
@@ -197,8 +195,6 @@ class RazeWindow(QMainWindow):
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-
-        # Container video con scanlines overlay
         vid_container = QWidget()
         vid_container.setMinimumHeight(240)
         self.vid = QVideoWidget(vid_container)
@@ -208,32 +204,26 @@ class RazeWindow(QMainWindow):
         self.vid_placeholder.setTextFormat(Qt.TextFormat.RichText)
         self.vid_placeholder.hide()
         self._scanline = ScanlineOverlay(vid_container, self.C)
-
         def resize_vid(e):
             self.vid.setGeometry(vid_container.rect())
             self.vid_placeholder.setGeometry(vid_container.rect())
             self._scanline.setGeometry(vid_container.rect())
         vid_container.resizeEvent = resize_vid
         lay.addWidget(vid_container, stretch=1)
-
-        # Info panel
         info_bar = QWidget()
         info_bar.setFixedHeight(90)
         info_bar.setStyleSheet(f"background:{self.C['bg1']}; border-top:1px solid {self.C['border']};")
         info_lay = QVBoxLayout(info_bar)
         info_lay.setContentsMargins(12, 8, 12, 8)
         info_lay.setSpacing(6)
-
         self.status_lbl = QLabel("[ STANDBY ]")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_lbl.setStyleSheet(f"color:{self.C['hi']}; font-size:11px; letter-spacing:2px;")
         info_lay.addWidget(self.status_lbl)
-
         self.info_lbl = QLabel(f"SYS:RAZE  LLM:GEMMA3  THEME:{self.C['name'].upper()}")
         self.info_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.info_lbl.setStyleSheet(f"color:{self.C['dim']}; font-size:9px; letter-spacing:1px;")
         info_lay.addWidget(self.info_lbl)
-
         lay.addWidget(info_bar)
         return panel
 
@@ -243,8 +233,6 @@ class RazeWindow(QMainWindow):
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-
-        # Header
         hdr = QWidget()
         hdr.setFixedHeight(28)
         hdr.setStyleSheet(f"background:{self.C['bg1']}; border-bottom:1px solid {self.C['border']};")
@@ -258,50 +246,38 @@ class RazeWindow(QMainWindow):
         clr.clicked.connect(self._clear_log)
         hl.addWidget(clr)
         lay.addWidget(hdr)
-
-        # Log
         self.log = QTextEdit()
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
         lay.addWidget(self.log, stretch=1)
-
-        # Typewriter per la risposta
         self._tw = TypewriterLabel(self.C)
         self._tw.setStyleSheet(f"color:{self.C['hi']}; font-family:'Courier New'; font-size:12px; padding:4px 10px; background:{self.C['bg']};")
         self._tw.setWordWrap(True)
         self._tw.hide()
         self._tw.finished.connect(self._on_typewriter_done)
         lay.addWidget(self._tw)
-
-        # Separatore input
         sep = QWidget()
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background:{self.C['border']};")
         lay.addWidget(sep)
-
-        # Input
         inp_bar = QWidget()
         inp_bar.setFixedHeight(44)
         inp_bar.setStyleSheet(f"background:{self.C['bg1']};")
         ib = QHBoxLayout(inp_bar)
         ib.setContentsMargins(0, 0, 8, 0)
         ib.setSpacing(0)
-
         prompt = QLabel(" > ")
         prompt.setStyleSheet(f"color:{self.C['hi']}; font-size:14px; padding:0 4px;")
         ib.addWidget(prompt)
-
         self.inp = QLineEdit()
         self.inp.setObjectName("inp")
         self.inp.setPlaceholderText("insert command...")
         self.inp.returnPressed.connect(self._send)
         ib.addWidget(self.inp, stretch=1)
-
         send_btn = QPushButton("SEND")
         send_btn.setObjectName("btn_hi")
         send_btn.clicked.connect(self._send)
         ib.addWidget(send_btn)
-
         lay.addWidget(inp_bar)
         return panel
 
@@ -327,28 +303,42 @@ class RazeWindow(QMainWindow):
                 " ██   ██  ██  ████ </pre>"
             )
             return
-        self.player = QMediaPlayer(self)
-        self.ao = QAudioOutput(self)
-        self.ao.setVolume(0)
-        self.player.setAudioOutput(self.ao)
-        self.player.setVideoOutput(self.vid)
-        self.player.mediaStatusChanged.connect(self._on_media)
-        self._play_video(self._vid_idle)
+        try:
+            self._player = QMediaPlayer(self)
+            self._ao = QAudioOutput(self)
+            self._ao.setVolume(0)
+            self._player.setAudioOutput(self._ao)
+            self._player.setVideoOutput(self.vid)
+            self._player.mediaStatusChanged.connect(self._on_media)
+            self._play_video(self._vid_idle)
+        except Exception as e:
+            print(f"[RAZE] Video init error: {e}")
+            self._player = None
+            self.vid.hide()
+            self.vid_placeholder.show()
 
     def _play_video(self, path):
+        if self._player is None:
+            return
         if not os.path.exists(path):
             path = self._vid_idle
-        self.player.setSource(QUrl.fromLocalFile(path))
-        self.player.play()
+        try:
+            self._player.setSource(QUrl.fromLocalFile(path))
+            self._player.play()
+        except Exception as e:
+            print(f"[RAZE] Video play error: {e}")
 
     def _on_media(self, s):
+        if self._player is None or self._closing:
+            return
         if s == QMediaPlayer.MediaStatus.EndOfMedia:
-            self.player.setPosition(0)
-            self.player.play()
+            try:
+                self._player.setPosition(0)
+                self._player.play()
+            except Exception:
+                pass
 
     def _set_thinking(self, on: bool):
-        if not hasattr(self, "player"):
-            return
         self._play_video(self._vid_thinking if on else self._vid_idle)
 
     def _send(self):
@@ -359,21 +349,23 @@ class RazeWindow(QMainWindow):
         self._log(f"<span style='color:{self.C['dim']}'>&gt;&nbsp;{text}</span>")
         self._set_status("PROCESSING")
         self._set_thinking(True)
-
-        self.worker = WorkerThread(text, self._conv)
-        self.worker.response_ready.connect(self._on_resp)
-        self.worker.error_occurred.connect(self._on_err)
-        self.worker.start()
+        self._worker = WorkerThread(text, self._conv)
+        self._worker.response_ready.connect(self._on_resp)
+        self._worker.error_occurred.connect(self._on_err)
+        self._worker.start()
 
     def _on_resp(self, text):
+        if self._closing:
+            return
         self._set_thinking(False)
         self._set_status("RESPONDING")
         self._statusbar.inc_messages()
-        # Mostra risposta con typewriter
         self._tw.show()
         self._tw.type_text(text)
 
     def _on_typewriter_done(self):
+        if self._closing:
+            return
         text = self._tw.text()
         self._tw.hide()
         self._tw.setText("")
@@ -381,6 +373,8 @@ class RazeWindow(QMainWindow):
         self._set_status("STANDBY")
 
     def _on_err(self, err):
+        if self._closing:
+            return
         self._set_thinking(False)
         self._log(f"<span style='color:{self.C['mid']}'>ERR: {err}</span>")
         self._set_status("ERROR")
@@ -399,9 +393,28 @@ class RazeWindow(QMainWindow):
         self._statusbar.set_status(text)
 
     def _blink(self):
+        if self._closing:
+            return
         if "STANDBY" in self.status_bar_lbl.text():
             self._blink_state = not self._blink_state
             self.status_bar_lbl.setText("STANDBY" if self._blink_state else "_ _ _ _ _")
+
+    def closeEvent(self, e):
+        self._closing = True
+        self._blink_timer.stop()
+        # Ferma il typewriter
+        if hasattr(self, "_tw"):
+            self._tw.stop_typing()
+        # Attendi che il worker finisca (max 3s) prima di chiudere
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.wait(3000)
+        # Ferma il player
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+        super().closeEvent(e)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
