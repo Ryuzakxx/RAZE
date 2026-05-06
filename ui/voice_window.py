@@ -1,12 +1,12 @@
 """
-ui/voice_window.py - Modalità voce RAZE
+ui/voice_window.py - RAZE Voice Mode
+Stile Oxide/Warp con arancione accent
 """
 
 import os
-
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QDialog, QComboBox, QSlider
+    QLabel, QPushButton, QDialog, QComboBox, QSlider, QFrame
 )
 from PyQt6.QtCore  import Qt, QUrl, QTimer, pyqtSignal, QThread
 from PyQt6.QtMultimedia        import QMediaPlayer, QAudioOutput
@@ -14,243 +14,137 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtGui   import QFontDatabase
 
 from ui.theme   import get
-from ui.widgets import MicLevelBar, WaveformWidget, MicMonitor
+from ui.widgets import MicLevelBar, WaveformWidget, StatusBar, MicMonitor
 
-
-# ── Font ─────────────────────────────────────────────────────────────────────
-
-def _register_fonts():
-    base = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "assets")
-    )
-    for fname in (
-        "SpaceMono-Regular.ttf",
-        "SpaceMono-Bold.ttf",
-        "SpaceMono-Italic.ttf",
-        "SpaceMono-BoldItalic.ttf",
-    ):
-        p = os.path.join(base, fname)
-        if os.path.exists(p):
-            QFontDatabase.addApplicationFont(p)
-
-_register_fonts()
 _FF = "'Space Mono','Courier New',monospace"
 
+def _register_fonts():
+    base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
+    for f in ("SpaceMono-Regular.ttf","SpaceMono-Bold.ttf"):
+        p = os.path.join(base, f)
+        if os.path.exists(p): QFontDatabase.addApplicationFont(p)
 
-def _ss(C: dict) -> str:
+_register_fonts()
+
+def _ss(C):
     return f"""
-* {{ background-color: {C['bg']}; color: {C['mid']};
-     font-family: {_FF}; font-size: 12px; border: none; }}
-QLabel {{ color: {C['mid']}; background: transparent; border: none; }}
-QPushButton#btn {{
-    background: transparent; color: {C['dim']};
-    border: 1px solid {C['border']}; padding: 0 10px;
-    font-family: {_FF}; font-size: 10px; letter-spacing: 1px;
-}}
-QPushButton#btn:hover {{ color: {C['hi']}; border: 1px solid {C['hi']}; }}
-QPushButton#btn_hi {{
-    background: transparent; color: {C['hi']};
-    border: 1px solid {C['hi']}; padding: 6px 16px;
-    font-family: {_FF}; font-size: 11px; letter-spacing: 2px;
-}}
-QPushButton#btn_hi:hover {{ background: {C['hi']}; color: {C['bg']}; }}
-QComboBox {{
-    background: {C['bg1']}; color: {C['hi']};
-    border: 1px solid {C['border']}; padding: 4px 8px; min-width: 260px;
-    font-family: {_FF};
-}}
-QComboBox QAbstractItemView {{
-    background: {C['bg1']}; color: {C['hi']};
-    selection-background-color: {C['hi']}; selection-color: {C['bg']};
-    border: 1px solid {C['border']};
-}}
-QSlider::groove:horizontal {{ background: {C['border']}; height: 2px; }}
-QSlider::handle:horizontal {{
-    background: {C['hi']}; width: 12px; height: 12px;
-    margin: -5px 0; border-radius: 6px;
-}}
-QSlider::sub-page:horizontal {{ background: {C['hi']}; }}
+QWidget {{ background:{C['bg']}; color:{C['text']}; font-family:{_FF}; font-size:12px; border:none; }}
+QLabel {{ color:{C['mid']}; background:transparent; border:none; }}
+QFrame#cell {{ background:{C['bg1']}; border:1px solid {C['border']}; border-radius:6px; }}
+QPushButton#tbtn {{ background:transparent; color:{C['dim']}; border:1px solid {C['border']}; padding:0 10px; font-family:{_FF}; font-size:9px; letter-spacing:1px; border-radius:4px; }}
+QPushButton#tbtn:hover {{ color:{C['text']}; border-color:{C['mid']}; }}
+QPushButton#btn_hi {{ background:transparent; color:{C['hi']}; border:1px solid {C['hi']}; padding:8px 20px; font-family:{_FF}; font-size:10px; letter-spacing:2px; border-radius:4px; }}
+QPushButton#btn_hi:hover {{ background:{C['hi']}; color:{C['bg']}; }}
+QComboBox {{ background:{C['bg2']}; color:{C['text']}; border:1px solid {C['border']}; padding:6px 10px; min-width:260px; border-radius:4px; font-family:{_FF}; }}
+QComboBox:hover {{ border-color:{C['mid']}; }}
+QComboBox QAbstractItemView {{ background:{C['bg2']}; color:{C['text']}; selection-background-color:{C['hi']}; selection-color:{C['bg']}; border:1px solid {C['border']}; }}
+QSlider::groove:horizontal {{ background:{C['border']}; height:3px; border-radius:1px; }}
+QSlider::handle:horizontal {{ background:{C['hi']}; width:13px; height:13px; margin:-5px 0; border-radius:6px; }}
+QSlider::sub-page:horizontal {{ background:{C['hi']}; border-radius:1px; }}
 """
 
+DIALOG_EXTRA = lambda C: f"QDialog {{ background:{C['bg']}; border:1px solid {C['border']}; border-radius:8px; }}"
 
-# ── StatusBar locale ────────────────────────────────────────────────────────────
-
-class StatusBar(QWidget):
-    """Pannello di stato per VoiceWindow, definito localmente."""
-
-    def __init__(self, C: dict):
-        super().__init__()
-        self.C = C
-        self._messages = 0
-        self.setFixedHeight(26)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 0, 14, 0)
-        lay.setSpacing(16)
-        self.setStyleSheet(
-            f"background:{C['bg1']}; border-top:1px solid {C['border']};"
-        )
-        self._status_lbl = QLabel("STANDBY")
-        self._status_lbl.setStyleSheet(
-            f"color:{C['dim']}; font-size:9px; letter-spacing:2px;"
-            f" background:transparent; border:none;"
-        )
-        lay.addWidget(self._status_lbl)
-        lay.addStretch()
-        self._msg_lbl = QLabel("MSGS 0")
-        self._msg_lbl.setStyleSheet(
-            f"color:{C['dim']}; font-size:9px; letter-spacing:1px;"
-            f" background:transparent; border:none;"
-        )
-        lay.addWidget(self._msg_lbl)
-
-    def set_status(self, text: str):
-        self._status_lbl.setText(text)
-
-    def inc_messages(self):
-        self._messages += 1
-        self._msg_lbl.setText(f"MSGS {self._messages}")
-
-
-# ── Model loader thread ───────────────────────────────────────────────────────
 
 class ModelLoaderThread(QThread):
     finished = pyqtSignal()
     error    = pyqtSignal(str)
-
-    def __init__(self, model_name: str = "small"):
-        super().__init__()
-        self._model_name = model_name
-
+    def __init__(self, model="small"):
+        super().__init__(); self._m = model
     def run(self):
         try:
             from core.stt import preload_model
-            preload_model(self._model_name)
-            self.finished.emit()
+            preload_model(self._m); self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
 
-
-# ── Settings dialog ───────────────────────────────────────────────────────────
 
 class VoiceSettingsDialog(QDialog):
     def __init__(self, parent=None, cur_in=None, cur_out=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(480)
         C = get()
-        self.setStyleSheet(_ss(C) + f"QDialog {{ background:{C['bg']}; border:1px solid {C['border']}; }}")
+        self.setStyleSheet(_ss(C) + DIALOG_EXTRA(C))
         self.C = C
         self.selected_input  = cur_in
         self.selected_output = cur_out
         self._in_devs = self._out_devs = self._models = []
-        self._build()
-        self._populate()
+        self._build(); self._populate()
 
     def _build(self):
         C = self.C
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(12)
-        hdr = QLabel("> VOICE_CONFIG")
-        hdr.setStyleSheet(
-            f"color:{C['hi']}; font-size:13px; letter-spacing:4px;"
-            f" padding-bottom:10px; border-bottom:1px solid {C['border']};"
-        )
+        lay = QVBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(14)
+
+        hdr = QLabel("VOICE_CONFIG")
+        hdr.setStyleSheet(f"color:{C['hi']}; font-size:12px; letter-spacing:4px; padding-bottom:12px; border-bottom:1px solid {C['border']}; background:transparent;")
         lay.addWidget(hdr)
-        for attr, label in [
-            ("in_combo",  "INPUT // MICROPHONE"),
-            ("out_combo", "OUTPUT // SPEAKER"),
-        ]:
-            lay.addWidget(self._lbl(label))
-            combo = QComboBox()
-            setattr(self, attr, combo)
-            lay.addWidget(combo)
+
+        for attr, lbl in [("in_combo","INPUT // MICROPHONE"),("out_combo","OUTPUT // SPEAKER")]:
+            l = QLabel(lbl); l.setStyleSheet(f"color:{C['dim']}; font-size:9px; letter-spacing:2px; background:transparent;")
+            lay.addWidget(l)
+            combo = QComboBox(); setattr(self, attr, combo); lay.addWidget(combo)
+
         self.in_combo.currentIndexChanged.connect(self._on_in)
         self.out_combo.currentIndexChanged.connect(self._on_out)
-        lay.addWidget(self._lbl("TTS // VOICE MODEL"))
-        self.voice_combo = QComboBox()
-        lay.addWidget(self.voice_combo)
-        lay.addWidget(self._lbl("TTS // SPEED"))
-        row = QHBoxLayout()
-        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
-        self.speed_slider.setRange(50, 200)
-        self.speed_slider.setValue(100)
-        self.speed_val = QLabel("1.0x")
-        self.speed_val.setStyleSheet(
-            f"color:{C['hi']}; min-width:36px; background:transparent;"
-        )
-        self.speed_slider.valueChanged.connect(
-            lambda v: self.speed_val.setText(f"{v/100:.1f}x")
-        )
-        row.addWidget(self.speed_slider)
-        row.addWidget(self.speed_val)
-        lay.addLayout(row)
-        lay.addStretch()
-        row2 = QHBoxLayout()
-        row2.addStretch()
-        for txt, slot in [("CANCEL", self.reject), ("APPLY", self.accept)]:
-            b = QPushButton(txt)
-            b.setObjectName("btn_hi")
-            b.clicked.connect(slot)
-            row2.addWidget(b)
-        lay.addLayout(row2)
 
-    def _lbl(self, t: str) -> QLabel:
-        l = QLabel(t)
-        l.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:10px;"
-            f" letter-spacing:1px; margin-top:4px; background:transparent;"
-        )
-        return l
+        tts_l = QLabel("TTS // VOICE MODEL"); tts_l.setStyleSheet(f"color:{C['dim']}; font-size:9px; letter-spacing:2px; background:transparent;")
+        lay.addWidget(tts_l)
+        self.voice_combo = QComboBox(); lay.addWidget(self.voice_combo)
+
+        spd_l = QLabel("TTS // SPEED"); spd_l.setStyleSheet(f"color:{C['dim']}; font-size:9px; letter-spacing:2px; background:transparent;")
+        lay.addWidget(spd_l)
+        row = QHBoxLayout()
+        self.speed_s = QSlider(Qt.Orientation.Horizontal); self.speed_s.setRange(50,200); self.speed_s.setValue(100)
+        self.speed_v = QLabel("1.0×"); self.speed_v.setStyleSheet(f"color:{C['hi']}; min-width:40px; background:transparent;")
+        self.speed_s.valueChanged.connect(lambda v: self.speed_v.setText(f"{v/100:.1f}×"))
+        row.addWidget(self.speed_s); row.addWidget(self.speed_v); lay.addLayout(row)
+
+        lay.addStretch()
+        br = QHBoxLayout(); br.addStretch()
+        for t, s in [("CANCEL",self.reject),("APPLY",self.accept)]:
+            b = QPushButton(t); b.setObjectName("btn_hi"); b.clicked.connect(s); br.addWidget(b)
+        lay.addLayout(br)
 
     def _populate(self):
         try:
             import sounddevice as sd
             devs = list(enumerate(sd.query_devices()))
-            self._in_devs  = [(i, d["name"]) for i, d in devs if d["max_input_channels"]  > 0]
-            self._out_devs = [(i, d["name"]) for i, d in devs if d["max_output_channels"] > 0]
-        except Exception:
-            pass
-        for combo, devs, cur in [
-            (self.in_combo,  self._in_devs,  self.selected_input),
-            (self.out_combo, self._out_devs, self.selected_output),
+            self._in_devs  = [(i,d["name"]) for i,d in devs if d["max_input_channels"]>0]
+            self._out_devs = [(i,d["name"]) for i,d in devs if d["max_output_channels"]>0]
+        except Exception: pass
+
+        for combo, devs, cur, attr in [
+            (self.in_combo, self._in_devs, self.selected_input, "selected_input"),
+            (self.out_combo, self._out_devs, self.selected_output, "selected_output"),
         ]:
             combo.blockSignals(True)
             sel = 0
-            for i, (idx, name) in enumerate(devs):
-                combo.addItem(f"[{idx}] {name}", idx)
-                if idx == cur:
-                    sel = i
+            for i,(idx,name) in enumerate(devs):
+                combo.addItem(f"[{idx}]  {name}", idx)
+                if idx == cur: sel = i
             if devs:
                 combo.setCurrentIndex(sel)
-                if combo is self.in_combo:
-                    self.selected_input  = devs[sel][0]
-                else:
-                    self.selected_output = devs[sel][0]
+                setattr(self, attr, devs[sel][0])
             combo.blockSignals(False)
+
         try:
             from core.tts import TTSEngine
             self._models = TTSEngine.list_models()
-        except Exception:
-            self._models = []
-        for m in self._models:
-            self.voice_combo.addItem(m, m)
+        except Exception: self._models = []
+        for m in self._models: self.voice_combo.addItem(m, m)
 
     def _on_in(self, i):
-        if 0 <= i < len(self._in_devs):  self.selected_input  = self._in_devs[i][0]
-
+        if 0 <= i < len(self._in_devs): self.selected_input = self._in_devs[i][0]
     def _on_out(self, i):
         if 0 <= i < len(self._out_devs): self.selected_output = self._out_devs[i][0]
-
     def get_input(self):  return self.selected_input
     def get_output(self): return self.selected_output
-    def get_speed(self):  return self.speed_slider.value()
+    def get_speed(self):  return self.speed_s.value()
     def get_model(self):
         i = self.voice_combo.currentIndex()
-        return self._models[i] if 0 <= i < len(self._models) else None
+        return self._models[i] if 0<=i<len(self._models) else None
 
-
-# ── VoiceWindow ───────────────────────────────────────────────────────────────
 
 class VoiceWindow(QMainWindow):
     back_requested = pyqtSignal()
@@ -259,240 +153,159 @@ class VoiceWindow(QMainWindow):
         super().__init__()
         self.C = get()
         self.setWindowTitle("RAZE")
-        self.setMinimumSize(480, 580)
-        self.resize(520, 620)
+        self.setMinimumSize(500,600); self.resize(540,660)
         self.setStyleSheet(_ss(self.C))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self._drag_pos      = None
-        self._mic_in        = mic_in
-        self._mic_out       = mic_out
-        self._busy          = False
-        self._listener      = None
-        self._worker        = None
-        self._old_listeners = []
-        self._closing       = False
-        self._player        = None
-        self._model_ready   = False
-        self._tts           = None
-        self._loader        = None
-        self._mic_monitor   = None
+        self._drag_pos = None; self._mic_in = mic_in; self._mic_out = mic_out
+        self._busy = False; self._listener = None; self._worker = None
+        self._old_listeners = []; self._closing = False; self._player = None
+        self._model_ready = False
 
         from core.llm import Conversation
         self._conv = Conversation()
+        from core.tts import TTSEngine
+        self._tts = TTSEngine()
+        self._tts.speech_finished.connect(self._on_tts_done)
 
-        self._build()
-        self._load_video()
+        self._build(); self._load_video()
 
-        # ── TTS (con fallback) ────────────────────────────────────────────
-        try:
-            from core.tts import TTSEngine
-            self._tts = TTSEngine()
-            self._tts.speech_finished.connect(self._on_tts_done)
-        except Exception as e:
-            print(f"[RAZE] TTS non disponibile: {e}")
+        self._mic_mon = MicMonitor(device_index=mic_in)
+        self._mic_mon.level_updated.connect(self._on_mic_level)
+        self._mic_mon.start_monitoring()
 
-        # ── MicMonitor (con fallback) ───────────────────────────────────────
-        try:
-            self._mic_monitor = MicMonitor(device_index=mic_in)
-            self._mic_monitor.level_updated.connect(self._on_mic_level)
-            self._mic_monitor.start_monitoring()
-        except Exception as e:
-            print(f"[RAZE] MicMonitor non disponibile: {e}")
-
-        # ── STT model loader (con fallback) ─────────────────────────────────
-        self._set_status("CARICAMENTO MODELLO...")
-        try:
-            self._loader = ModelLoaderThread("small")
-            self._loader.finished.connect(self._on_model_ready)
-            self._loader.error.connect(self._on_model_error)
-            self._loader.start()
-        except Exception as e:
-            self._on_model_error(str(e))
-
-    # ── Build UI ────────────────────────────────────────────────────────────
+        self._set_status("LOADING MODEL")
+        self._loader = ModelLoaderThread("small")
+        self._loader.finished.connect(self._on_model_ready)
+        self._loader.error.connect(lambda e: self._set_status(f"MODEL ERR"))
+        self._loader.start()
 
     def _build(self):
         C = self.C
-        root = QWidget()
-        self.setCentralWidget(root)
-        lay = QVBoxLayout(root)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._make_titlebar(C))
-        lay.addWidget(self._make_video_area(C), stretch=1)
-        lay.addWidget(self._make_waveform_bar(C))
-        lay.addWidget(self._make_status_panel(C))
-        self._statusbar = StatusBar(C)
-        lay.addWidget(self._statusbar)
+        root = QWidget(); self.setCentralWidget(root)
+        vl = QVBoxLayout(root); vl.setContentsMargins(0,0,0,0); vl.setSpacing(0)
+        vl.addWidget(self._titlebar(C))
 
-        self._blink_state = True
-        self._blink_timer = QTimer(self)
-        self._blink_timer.timeout.connect(self._blink)
-        self._blink_timer.start(800)
-
-    def _make_titlebar(self, C):
-        bar = QWidget()
-        bar.setFixedHeight(36)
-        bar.setStyleSheet(
-            f"background:{C['bg1']}; border-bottom:1px solid {C['border']};"
-        )
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(14, 0, 8, 0)
-        t = QLabel("RAZE // VOICE_MODE")
-        t.setStyleSheet(
-            f"color:{C['hi']}; font-size:11px; letter-spacing:5px;"
-            f" background:transparent; border:none;"
-        )
-        bl.addWidget(t)
-        bl.addStretch()
-        for txt, slot in [("CFG", self._settings), ("MENU", self._back), ("×", self.close)]:
-            b = QPushButton(txt)
-            b.setFixedHeight(24)
-            b.setStyleSheet(
-                f"QPushButton{{background:transparent;color:{C['dim']};"
-                f"border:1px solid {C['border']};padding:0 10px;"
-                f"font-family:{_FF};font-size:10px;letter-spacing:1px;}}"
-                f"QPushButton:hover{{color:{C['hi']};border:1px solid {C['hi']};}}"
-            )
-            b.clicked.connect(slot)
-            bl.addWidget(b)
-            bl.addSpacing(2)
-        return bar
-
-    def _make_video_area(self, C):
-        vc = QWidget()
-        vc.setStyleSheet(f"background:{C['bg']}; border:none;")
-        self.vid = QVideoWidget(vc)
-        self.vid.setStyleSheet(f"background:{C['bg']};")
-        self.vid_ph = QLabel(vc)
-        self.vid_ph.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.vid_ph.setStyleSheet(
-            f"color:{C['dim']}; background:transparent; border:none; font-family:{_FF};"
-        )
+        # Video area — senza celle, diretto
+        vc = QWidget(); vc.setStyleSheet(f"background:{C['bg']}; border:none;")
+        self.vid = QVideoWidget(vc); self.vid.setStyleSheet(f"background:{C['bg']};")
+        self.vid_ph = QLabel(vc); self.vid_ph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.vid_ph.setStyleSheet(f"color:{C['dim']}; background:transparent; border:none; font-family:{_FF}; font-size:10px;")
         self.vid_ph.hide()
-        def _resize(e):
-            self.vid.setGeometry(vc.rect())
-            self.vid_ph.setGeometry(vc.rect())
-        vc.resizeEvent = _resize
-        return vc
+        def _r(e): self.vid.setGeometry(vc.rect()); self.vid_ph.setGeometry(vc.rect())
+        vc.resizeEvent = _r
+        vl.addWidget(vc, stretch=1)
 
-    def _make_waveform_bar(self, C):
-        wf_bar = QWidget()
-        wf_bar.setFixedHeight(28)
-        wf_bar.setStyleSheet(
-            f"background:{C['bg1']}; border-top:1px solid {C['border']};"
-        )
-        wfl = QHBoxLayout(wf_bar)
-        wfl.setContentsMargins(8, 2, 8, 2)
-        self._waveform = WaveformWidget(C, cols=40)
-        wfl.addWidget(self._waveform)
-        return wf_bar
+        # Waveform bar
+        wf = QWidget(); wf.setFixedHeight(32)
+        wf.setStyleSheet(f"background:{C['bg1']}; border-top:1px solid {C['border']};")
+        wfl = QHBoxLayout(wf); wfl.setContentsMargins(12,4,12,4)
+        wl = QLabel("◈ "); wl.setStyleSheet(f"color:{C['hi']}; font-size:10px; background:transparent; border:none;")
+        wfl.addWidget(wl)
+        self._wf = WaveformWidget(C, cols=38); wfl.addWidget(self._wf)
+        vl.addWidget(wf)
 
-    def _make_status_panel(self, C):
-        sb = QWidget()
-        sb.setFixedHeight(72)
-        sb.setStyleSheet(
-            f"background:{C['bg1']}; border-top:1px solid {C['border']};"
-        )
-        sl = QVBoxLayout(sb)
-        sl.setContentsMargins(16, 8, 16, 8)
-        sl.setSpacing(4)
-        self.status_lbl = QLabel("[ CARICAMENTO MODELLO... ]")
+        # Status panel
+        sp = QWidget(); sp.setFixedHeight(80)
+        sp.setStyleSheet(f"background:{C['bg1']}; border-top:1px solid {C['border']};")
+        spl = QVBoxLayout(sp); spl.setContentsMargins(20,12,20,12); spl.setSpacing(6)
+
+        self.status_lbl = QLabel("[ LOADING ]")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_lbl.setStyleSheet(
-            f"color:{C['hi']}; font-size:11px; letter-spacing:3px;"
-            f" background:transparent; border:none;"
-        )
-        sl.addWidget(self.status_lbl)
+        self.status_lbl.setStyleSheet(f"color:{C['hi']}; font-size:11px; letter-spacing:3px; background:transparent; border:none;")
+        spl.addWidget(self.status_lbl)
+
         self.transcript_lbl = QLabel("")
         self.transcript_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.transcript_lbl.setStyleSheet(
-            f"color:{C['dim']}; font-size:10px; background:transparent; border:none;"
-        )
-        sl.addWidget(self.transcript_lbl)
-        mic_row = QHBoxLayout()
-        mic_row.setContentsMargins(0, 0, 0, 0)
-        mic_lbl = QLabel("MIC ")
-        mic_lbl.setStyleSheet(
-            f"color:{C['dim']}; font-size:9px; background:transparent; border:none;"
-        )
-        mic_row.addWidget(mic_lbl)
-        self._mic_bar = MicLevelBar(C, width=24)
-        mic_row.addWidget(self._mic_bar)
-        mic_row.addStretch()
-        sl.addLayout(mic_row)
-        return sb
+        self.transcript_lbl.setStyleSheet(f"color:{C['mid']}; font-size:10px; background:transparent; border:none;")
+        spl.addWidget(self.transcript_lbl)
 
-    # ── Video ───────────────────────────────────────────────────────────────
+        mic_row = QHBoxLayout(); mic_row.setContentsMargins(0,0,0,0)
+        ml = QLabel("MIC  "); ml.setStyleSheet(f"color:{C['dim']}; font-size:9px; background:transparent; border:none;")
+        mic_row.addWidget(ml)
+        self._mic_bar = MicLevelBar(C, width=22)
+        mic_row.addWidget(self._mic_bar); mic_row.addStretch()
+        spl.addLayout(mic_row)
+        vl.addWidget(sp)
+
+        self._sb = StatusBar(C); vl.addWidget(self._sb)
+
+        self._blink_s = True
+        self._blink_t = QTimer(self); self._blink_t.timeout.connect(self._blink); self._blink_t.start(800)
+
+    def _titlebar(self, C):
+        bar = QWidget(); bar.setFixedHeight(38)
+        bar.setStyleSheet(f"background:{C['bg1']}; border-bottom:1px solid {C['border']};")
+        hl = QHBoxLayout(bar); hl.setContentsMargins(16,0,8,0); hl.setSpacing(0)
+
+        for c in ["#ff5f57","#febc2e","#28c840"]:
+            d = QLabel("●"); d.setFixedSize(14,14)
+            d.setStyleSheet(f"color:{c}; font-size:9px; background:transparent; border:none;")
+            hl.addWidget(d)
+        hl.addSpacing(14)
+
+        # Tab attivo
+        tab = QWidget(); tab.setFixedHeight(38)
+        tab.setStyleSheet(f"background:{C['bg']}; border-left:1px solid {C['border']}; border-right:1px solid {C['border']}; border-bottom:2px solid {C['hi']};")
+        tl = QHBoxLayout(tab); tl.setContentsMargins(16,0,16,0)
+        lbl = QLabel("VOICE_MODE"); lbl.setStyleSheet(f"color:{C['hi']}; font-size:10px; letter-spacing:2px; background:transparent; border:none;")
+        tl.addWidget(lbl); hl.addWidget(tab)
+        hl.addStretch()
+
+        for txt, slot in [("CFG",self._settings),("MENU",self._back),("×",self.close)]:
+            b = QPushButton(txt); b.setFixedHeight(26)
+            b.setStyleSheet(
+                f"QPushButton{{background:transparent;color:{C['dim']};border:1px solid {C['border']};padding:0 10px;font-family:{_FF};font-size:9px;letter-spacing:1px;border-radius:4px;}}"
+                f"QPushButton:hover{{color:{C['text']};border-color:{C['mid']};}}"
+            )
+            b.clicked.connect(slot); hl.addWidget(b); hl.addSpacing(4)
+        return bar
 
     def _load_video(self):
-        base = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "assets")
-        )
+        base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
         self._vid_idle     = os.path.join(base, "raze_white.mp4")
         self._vid_thinking = os.path.join(base, "loading.mp4")
         if not os.path.exists(self._vid_idle):
             self.vid.hide(); self.vid_ph.show(); self.vid_ph.setText("[ NO VIDEO ]"); return
         try:
-            self._player = QMediaPlayer(self)
-            self._ao = QAudioOutput(self)
-            self._ao.setVolume(0)
-            self._player.setAudioOutput(self._ao)
+            self._player = QMediaPlayer(self); self._ao = QAudioOutput(self)
+            self._ao.setVolume(0); self._player.setAudioOutput(self._ao)
             self._player.setVideoOutput(self.vid)
             self._player.mediaStatusChanged.connect(self._on_media)
-            self._play_video(self._vid_idle)
+            self._play(self._vid_idle)
         except Exception as e:
-            print(f"[RAZE] Voice video init error: {e}")
-            self._player = None; self.vid.hide(); self.vid_ph.show()
+            print(f"[RAZE] video err: {e}"); self._player = None
+            self.vid.hide(); self.vid_ph.show()
 
-    def _play_video(self, path: str):
-        if self._player is None: return
+    def _play(self, path):
+        if not self._player: return
         if not os.path.exists(path): path = self._vid_idle
-        try:
-            self._player.setSource(QUrl.fromLocalFile(path)); self._player.play()
-        except Exception as e:
-            print(f"[RAZE] Video play error: {e}")
+        try: self._player.setSource(QUrl.fromLocalFile(path)); self._player.play()
+        except Exception as e: print(f"[RAZE] play err: {e}")
 
     def _on_media(self, s):
-        if self._player is None or self._closing: return
+        if not self._player or self._closing: return
         if s == QMediaPlayer.MediaStatus.EndOfMedia:
             try: self._player.setPosition(0); self._player.play()
             except Exception: pass
 
-    def _set_thinking(self, on: bool):
-        self._play_video(self._vid_thinking if on else self._vid_idle)
+    def _set_thinking(self, on):
+        self._play(self._vid_thinking if on else self._vid_idle)
 
-    # ── Model loading ─────────────────────────────────────────────────────────
+    def _on_mic_level(self, lv):
+        self._mic_bar.set_level(lv); self._wf.push_level(lv)
 
     def _on_model_ready(self):
         if self._closing: return
-        self._model_ready = True
-        self._set_status("LISTENING")
-        self.transcript_lbl.setText("")
-        QTimer.singleShot(200, self._listen)
-
-    def _on_model_error(self, err: str):
-        self._set_status("STT_ERROR")
-        self.transcript_lbl.setText(err[:80] if err else "core.stt non disponibile")
-
-    # ── Mic ──────────────────────────────────────────────────────────────────
-
-    def _on_mic_level(self, level: float):
-        self._mic_bar.set_level(level)
-        self._waveform.push_level(level)
-
-    # ── STT loop ────────────────────────────────────────────────────────────
+        self._model_ready = True; self._set_status("LISTENING")
+        self.transcript_lbl.setText(""); QTimer.singleShot(200, self._listen)
 
     def _listen(self):
         if self._busy or self._closing or not self._model_ready: return
         if self._listener and self._listener._running: return
         if self._listener:
-            try:
-                self._listener.phrase_ready.disconnect()
-                self._listener.error_occurred.disconnect()
+            try: self._listener.phrase_ready.disconnect(); self._listener.error_occurred.disconnect()
             except Exception: pass
-            self._old_listeners.append(self._listener)
-            self._listener = None
+            self._old_listeners.append(self._listener); self._listener = None
         self._old_listeners = [l for l in self._old_listeners if l._running]
         try:
             from core.stt import PhraseListener
@@ -500,144 +313,90 @@ class VoiceWindow(QMainWindow):
             self._listener.phrase_ready.connect(self._on_phrase)
             self._listener.error_occurred.connect(self._on_stt_err)
             self._listener.listen_once()
-            dev = f" [{self._mic_in}]" if self._mic_in is not None else ""
-            self._set_status(f"LISTENING{dev}")
-            self.transcript_lbl.setText("")
-        except Exception as e:
-            self._on_stt_err(str(e))
+            dev = f"  [{self._mic_in}]" if self._mic_in is not None else ""
+            self._set_status(f"LISTENING{dev}"); self.transcript_lbl.setText("")
+        except Exception as e: self._on_stt_err(str(e))
 
-    def _on_phrase(self, text: str):
+    def _on_phrase(self, text):
         try: self._listener.phrase_ready.disconnect(self._on_phrase)
         except Exception: pass
         if not text: QTimer.singleShot(300, self._listen); return
         self._busy = True
         self.transcript_lbl.setText(f'"{text}"')
-        self._set_status("THINKING")
-        self._set_thinking(True)
+        self._set_status("THINKING"); self._set_thinking(True)
         from ui.main_window import WorkerThread
         self._worker = WorkerThread(text, self._conv)
-        self._worker.response_ready.connect(self._on_response)
+        self._worker.response_ready.connect(self._on_resp)
         self._worker.error_occurred.connect(self._on_llm_err)
         self._worker.start()
 
-    def _on_response(self, text: str):
+    def _on_resp(self, text):
         if self._closing: return
-        self._set_thinking(False)
-        self.transcript_lbl.setText("")
-        self._set_status("SPEAKING")
-        self._statusbar.inc_messages()
-        if self._tts is not None:
-            self._tts.speak(text)
-        else:
-            QTimer.singleShot(100, self._on_tts_done)
+        self._set_thinking(False); self.transcript_lbl.setText("")
+        self._set_status("SPEAKING"); self._sb.inc_messages(); self._tts.speak(text)
 
     def _on_tts_done(self):
-        self._busy = False
-        self.transcript_lbl.setText("")
-        self._set_status("LISTENING")
-        QTimer.singleShot(500, self._listen)
+        self._busy = False; self._set_status("LISTENING"); QTimer.singleShot(500, self._listen)
 
-    def _on_stt_err(self, err: str):
-        self._set_status("MIC_ERROR")
-        self.transcript_lbl.setText(err[:80])
+    def _on_stt_err(self, err):
+        self._set_status("MIC_ERROR"); self.transcript_lbl.setText(err[:80])
 
-    def _on_llm_err(self, err: str):
-        self._busy = False
-        self._set_thinking(False)
-        self._set_status("LLM_ERROR")
-        self.transcript_lbl.setText(err[:60])
+    def _on_llm_err(self, err):
+        self._busy = False; self._set_thinking(False)
+        self._set_status("LLM_ERROR"); self.transcript_lbl.setText(err[:60])
         QTimer.singleShot(3000, self._listen)
-
-    # ── Settings ────────────────────────────────────────────────────────────
 
     def _settings(self):
         self._busy = True
-        if self._listener:
-            try: self._listener.stop()
-            except Exception: pass
+        if self._listener: self._listener.stop()
         d = VoiceSettingsDialog(self, cur_in=self._mic_in, cur_out=self._mic_out)
         if d.exec() == QDialog.DialogCode.Accepted:
-            self._mic_in  = d.get_input()
-            self._mic_out = d.get_output()
-            speed = d.get_speed()
-            model = d.get_model()
-            if self._tts is not None:
-                self._tts.set_speed(speed / 100.0)
-                if self._mic_out is not None:
-                    self._tts.set_output_device(self._mic_out)
-                if model:
-                    try:
-                        from core.tts import MODELS_DIR
-                        self._tts.set_model(os.path.join(MODELS_DIR, model))
-                    except Exception as e:
-                        print(f"[RAZE] set_model error: {e}")
-            if self._mic_monitor is not None:
-                try: self._mic_monitor.stop_monitoring()
-                except Exception: pass
-            try:
-                self._mic_monitor = MicMonitor(device_index=self._mic_in)
-                self._mic_monitor.level_updated.connect(self._on_mic_level)
-                self._mic_monitor.start_monitoring()
-            except Exception as e:
-                print(f"[RAZE] MicMonitor reinit error: {e}")
-                self._mic_monitor = None
-        self._busy = False
-        QTimer.singleShot(400, self._listen)
+            self._mic_in = d.get_input(); self._mic_out = d.get_output()
+            spd = d.get_speed(); mdl = d.get_model()
+            self._tts.set_speed(spd/100.0)
+            if self._mic_out is not None: self._tts.set_output_device(self._mic_out)
+            if mdl:
+                from core.tts import MODELS_DIR
+                self._tts.set_model(os.path.join(MODELS_DIR, mdl))
+            self._mic_mon.stop_monitoring()
+            self._mic_mon = MicMonitor(device_index=self._mic_in)
+            self._mic_mon.level_updated.connect(self._on_mic_level)
+            self._mic_mon.start_monitoring()
+        self._busy = False; QTimer.singleShot(400, self._listen)
 
-    # ── Helpers ────────────────────────────────────────────────────────────
-
-    def _set_status(self, text: str):
-        if hasattr(self, 'status_lbl'):
-            self.status_lbl.setText(f"[ {text} ]")
-        if hasattr(self, '_statusbar'):
-            self._statusbar.set_status(text)
+    def _set_status(self, t):
+        self.status_lbl.setText(f"[ {t} ]"); self._sb.set_status(t)
 
     def _blink(self):
         if self._closing: return
-        if hasattr(self, 'status_lbl') and "LISTENING" in self.status_lbl.text():
-            self._blink_state = not self._blink_state
-            sym = "LISTENING" if self._blink_state else "_ _ _ _ _ _"
-            self.status_lbl.setText(f"[ {sym} ]")
+        if "LISTENING" in self.status_lbl.text():
+            self._blink_s = not self._blink_s
+            self.status_lbl.setText("[ LISTENING ]" if self._blink_s else "[  ·  ·  ·  ]")
 
     def _back(self):
-        self._closing = True
-        self._cleanup()
-        if self._player is not None:
+        self._closing = True; self._blink_t.stop(); self._cleanup()
+        if self._player:
             try: self._player.stop()
             except Exception: pass
-        self.back_requested.emit()
-        self.close()
+        self.back_requested.emit(); self.close()
 
     def _cleanup(self):
-        if hasattr(self, "_blink_timer"):
-            self._blink_timer.stop()
-        if self._loader is not None and self._loader.isRunning():
-            self._loader.wait(3000)
-        if self._mic_monitor is not None:
-            try: self._mic_monitor.stop_monitoring()
-            except Exception: pass
-        if self._listener:
-            try: self._listener.stop()
-            except Exception: pass
+        if hasattr(self,"_loader") and self._loader.isRunning(): self._loader.wait(3000)
+        if hasattr(self,"_mic_mon"): self._mic_mon.stop_monitoring()
+        if self._listener: self._listener.stop()
 
     def closeEvent(self, e):
-        self._closing = True
-        self._cleanup()
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.wait(3000)
-        if self._player is not None:
+        self._closing = True; self._blink_t.stop(); self._cleanup()
+        if self._worker and self._worker.isRunning(): self._worker.wait(3000)
+        if self._player:
             try: self._player.stop()
             except Exception: pass
         super().closeEvent(e)
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = e.globalPosition().toPoint()
-
+        if e.button() == Qt.MouseButton.LeftButton: self._drag_pos = e.globalPosition().toPoint()
     def mouseMoveEvent(self, e):
         if self._drag_pos and e.buttons() == Qt.MouseButton.LeftButton:
             self.move(self.pos() + e.globalPosition().toPoint() - self._drag_pos)
             self._drag_pos = e.globalPosition().toPoint()
-
-    def mouseReleaseEvent(self, e):
-        self._drag_pos = None
+    def mouseReleaseEvent(self, e): self._drag_pos = None
