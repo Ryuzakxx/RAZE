@@ -1,11 +1,13 @@
 """
 ui/widgets.py
-Widget riutilizzabili: MicLevelBar, WaveformWidget, TypewriterLabel
+Widget riutilizzabili: MicLevelBar, WaveformWidget, MicMonitor, StatusBar
 """
 
 import numpy as np
 from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+_FF = "'Space Mono','Courier New',monospace"
 
 
 # ── Mic Level Bar ─────────────────────────────────────────────────────────────
@@ -112,3 +114,46 @@ class MicMonitor(QThread):
                     time.sleep(0.05)
         except Exception:
             pass
+
+
+# ── Status Bar ────────────────────────────────────────────────────────────────
+
+class StatusBar(QWidget):
+    """Barra di stato in basso: mostra status corrente e contatore messaggi."""
+
+    def __init__(self, theme: dict):
+        super().__init__()
+        self.C = theme
+        self._status = "STANDBY"
+        self._msgs   = 0
+        self.setFixedHeight(22)
+        self.setStyleSheet(
+            f"background:{self.C.get('bg1', '#0a0a0a')};"
+            f" border-top:1px solid {self.C.get('border', '#1a1a1a')};"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(0)
+
+        self._status_lbl = QLabel(f"● {self._status}")
+        self._status_lbl.setStyleSheet(
+            f"color:{self.C.get('dim', '#333333')}; font-family:{_FF};"
+            f" font-size:9px; letter-spacing:2px; background:transparent; border:none;"
+        )
+        lay.addWidget(self._status_lbl)
+        lay.addStretch()
+
+        self._msgs_lbl = QLabel("MSGS  0")
+        self._msgs_lbl.setStyleSheet(
+            f"color:{self.C.get('dim', '#333333')}; font-family:{_FF};"
+            f" font-size:9px; letter-spacing:1px; background:transparent; border:none;"
+        )
+        lay.addWidget(self._msgs_lbl)
+
+    def set_status(self, status: str):
+        self._status = status
+        self._status_lbl.setText(f"● {status}")
+
+    def inc_messages(self):
+        self._msgs += 1
+        self._msgs_lbl.setText(f"MSGS  {self._msgs}")
