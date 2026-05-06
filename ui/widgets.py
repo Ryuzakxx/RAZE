@@ -1,19 +1,11 @@
 """
 ui/widgets.py
-Widget riutilizzabili: MicLevelBar, WaveformWidget, TypewriterLabel, StatusBar
+Widget riutilizzabili: MicLevelBar, WaveformWidget, TypewriterLabel
 """
 
-import math
-import datetime
 import numpy as np
 from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt6.QtGui import QPainter, QColor, QPen
-
-try:
-    import psutil as _psutil
-except ImportError:
-    _psutil = None
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 
 # ── Mic Level Bar ─────────────────────────────────────────────────────────────
@@ -33,7 +25,6 @@ class MicLevelBar(QWidget):
         lay.addWidget(self._label)
 
     def set_level(self, level: float):
-        """level: 0.0 - 1.0"""
         self._level = max(0.0, min(1.0, level))
         self._label.setText(self._render())
         filled_color = self.C['hi'] if self._level > 0.6 else self.C['mid'] if self._level > 0.2 else self.C['dim']
@@ -41,7 +32,7 @@ class MicLevelBar(QWidget):
 
     def _render(self) -> str:
         filled = int(self._level * self._bars)
-        bar = "█" * filled + "░" * (self._bars - filled)
+        bar = "\u2588" * filled + "\u2591" * (self._bars - filled)
         return f"[{bar}]"
 
 
@@ -71,72 +62,14 @@ class WaveformWidget(QLabel):
             idx = min(int(s * (len(self.CHARS) - 1)), len(self.CHARS) - 1)
             chars.append(self.CHARS[idx])
         self.setText("".join(chars))
-        # Colore in base al livello medio
         avg = sum(self._samples) / len(self._samples)
         color = self.C['hi'] if avg > 0.3 else self.C['mid'] if avg > 0.05 else self.C['dim']
         self.setStyleSheet(f"color:{color}; font-family:'Courier New'; font-size:13px; letter-spacing:1px;")
 
 
-# ── Status Bar ────────────────────────────────────────────────────────────────
-
-class StatusBar(QWidget):
-    """Barra inferiore con ora, stats e info sistema."""
-
-    def __init__(self, theme: dict):
-        super().__init__()
-        self.C = theme
-        self.setFixedHeight(22)
-        self.setStyleSheet(f"background:{self.C['bg1']}; border-top:1px solid {self.C['border']};")
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 0, 10, 0)
-        lay.setSpacing(0)
-
-        self._left  = QLabel("")
-        self._left.setStyleSheet(f"color:{self.C['dim']}; font-family:'Courier New'; font-size:9px; letter-spacing:1px;")
-        lay.addWidget(self._left)
-        lay.addStretch()
-
-        self._right = QLabel("")
-        self._right.setStyleSheet(f"color:{self.C['dim']}; font-family:'Courier New'; font-size:9px; letter-spacing:1px;")
-        lay.addWidget(self._right)
-
-        self._tick = QTimer(self)
-        self._tick.timeout.connect(self._update)
-        self._tick.start(1000)
-
-        self._msg_count = 0
-        self._status    = "STANDBY"
-        self._update()
-
-    def set_status(self, s: str):
-        self._status = s
-        self._update()
-
-    def inc_messages(self):
-        self._msg_count += 1
-        self._update()
-
-    def _update(self):
-        now = datetime.datetime.now().strftime("%H:%M:%S")
-        try:
-            if _psutil is not None:
-                cpu = _psutil.cpu_percent(interval=None)
-                ram = _psutil.virtual_memory().used / (1024**3)
-                sys_str = f"CPU:{cpu:.0f}%  RAM:{ram:.1f}GB"
-            else:
-                sys_str = "psutil N/A"
-        except Exception:
-            sys_str = ""
-
-        self._left.setText(f"RAZE // {self._status}  |  MSGS:{self._msg_count}  |  {sys_str}")
-        self._right.setText(f"{now}")
-
-
 # ── Mic Monitor Thread ────────────────────────────────────────────────────────
 
 class MicMonitor(QThread):
-    """Legge il livello microfono in tempo reale ed emette il valore."""
     level_updated = pyqtSignal(float)
 
     def __init__(self, device_index=None):
