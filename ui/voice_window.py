@@ -93,7 +93,7 @@ class ModelLoaderThread(QThread):
             self.error.emit(str(e))
 
 
-# ── Settings dialog (senza ElevenLabs) ───────────────────────────────────────
+# ── Settings dialog ───────────────────────────────────────────────────────────
 
 class VoiceSettingsDialog(QDialog):
     def __init__(self, parent=None, cur_in=None, cur_out=None):
@@ -242,27 +242,43 @@ class VoiceWindow(QMainWindow):
         self._closing       = False
         self._player        = None
         self._model_ready   = False
+        self._tts           = None
+        self._loader        = None
+        self._mic_monitor   = None
 
         from core.llm import Conversation
         self._conv = Conversation()
 
-        from core.tts import TTSEngine
-        self._tts = TTSEngine()
-        self._tts.speech_finished.connect(self._on_tts_done)
-
         self._build()
         self._load_video()
 
-        self._mic_monitor = MicMonitor(device_index=mic_in)
-        self._mic_monitor.level_updated.connect(self._on_mic_level)
-        self._mic_monitor.start_monitoring()
+        # ── TTS init (con fallback) ──────────────────────────────────────────
+        try:
+            from core.tts import TTSEngine
+            self._tts = TTSEngine()
+            self._tts.speech_finished.connect(self._on_tts_done)
+        except Exception as e:
+            print(f"[RAZE] TTS non disponibile: {e}")
+            self._tts = None
 
-        # Carica modello Whisper in background
+        # ── MicMonitor (con fallback) ────────────────────────────────────────
+        try:
+            self._mic_monitor = MicMonitor(device_index=mic_in)
+            self._mic_monitor.level_updated.connect(self._on_mic_level)
+            self._mic_monitor.start_monitoring()
+        except Exception as e:
+            print(f"[RAZE] MicMonitor non disponibile: {e}")
+            self._mic_monitor = None
+
+        # ── STT model loader (con fallback) ──────────────────────────────────
         self._set_status("CARICAMENTO MODELLO...")
-        self._loader = ModelLoaderThread("small")
-        self._loader.finished.connect(self._on_model_ready)
-        self._loader.error.connect(self._on_model_error)
-        self._loader.start()
+        try:
+            self._loader = ModelLoaderThread("small")
+            self._loader.finished.connect(self._on_model_ready)
+            self._loader.error.connect(self._on_model_error)
+            self._loader.start()
+        except Exception as e:
+            self._on_model_error(str(e))
 
     # ── Build UI ──────────────────────────────────────────────────────────────
 
@@ -443,8 +459,8 @@ class VoiceWindow(QMainWindow):
         QTimer.singleShot(200, self._listen)
 
     def _on_model_error(self, err: str):
-        self._set_status("MODEL_ERROR")
-        self.transcript_lbl.setText(err[:80])
+        self._set_status("STT_ERROR")
+        self.transcript_lbl.setText(err[:80] if err else "core.stt non disponibile")
 
     # ── Mic ───────────────────────────────────────────────────────────────────
 
@@ -504,11 +520,14 @@ class VoiceWindow(QMainWindow):
         if self._closing:
             return
         self._set_thinking(False)
-        # Non mostrare il testo della risposta durante SPEAKING
         self.transcript_lbl.setText("")
         self._set_status("SPEAKING")
         self._statusbar.inc_messages()
-        self._tts.speak(text)
+        if self._tts is not None:
+            self._tts.speak(text)
+        else:
+            # TTS non disponibile: torna subito in ascolto
+            QTimer.singleShot(100, self._on_tts_done)
 
     def _on_tts_done(self):
         self._busy = False
@@ -539,16 +558,25 @@ class VoiceWindow(QMainWindow):
             self._mic_out = d.get_output()
             speed = d.get_speed()
             model = d.get_model()
-            self._tts.set_speed(speed / 100.0)
-            if self._mic_out is not None:
-                self._tts.set_output_device(self._mic_out)
-            if model:
-                from core.tts import MODELS_DIR
-                self._tts.set_model(os.path.join(MODELS_DIR, model))
-            self._mic_monitor.stop_monitoring()
-            self._mic_monitor = MicMonitor(device_index=self._mic_in)
-            self._mic_monitor.level_updated.connect(self._on_mic_level)
-            self._mic_monitor.start_monitoring()
+            if self._tts is not None:
+                self._tts.set_speed(speed / 100.0)
+                if self._mic_out is not None:
+                    self._tts.set_output_device(self._mic_out)
+                if model:
+                    try:
+                        from core.tts import MODELS_DIR
+                        self._tts.set_model(os.path.join(MODELS_DIR, model))
+                    except Exception as e:
+                        print(f"[RAZE] set_model error: {e}")
+            if self._mic_monitor is not None:
+                self._mic_monitor.stop_monitoring()
+            try:
+                self._mic_monitor = MicMonitor(device_index=self._mic_in)
+                self._mic_monitor.level_updated.connect(self._on_mic_level)
+                self._mic_monitor.start_monitoring()
+            except Exception as e:
+                print(f"[RAZE] MicMonitor reinit error: {e}")
+                self._mic_monitor = None
         self._busy = False
         QTimer.singleShot(400, self._listen)
 
@@ -578,12 +606,14 @@ class VoiceWindow(QMainWindow):
     def _cleanup(self):
         if hasattr(self, "_blink_timer"):
             self._blink_timer.stop()
-        if hasattr(self, "_loader") and self._loader.isRunning():
+        if self._loader is not None and self._loader.isRunning():
             self._loader.wait(3000)
-        if hasattr(self, "_mic_monitor"):
-            self._mic_monitor.stop_monitoring()
+        if self._mic_monitor is not None:
+            try: self._mic_monitor.stop_monitoring()
+            except Exception: pass
         if self._listener:
-            self._listener.stop()
+            try: self._listener.stop()
+            except Exception: pass
 
     def closeEvent(self, e):
         self._closing = True
