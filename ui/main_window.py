@@ -625,12 +625,6 @@ class RazeWindow(QMainWindow):
         self.inp.returnPressed.connect(self._send)
         ib.addWidget(self.inp, stretch=1)
 
-        # bottone SEND identico a mode_btn
-        send_btn = QPushButton("SEND")
-        send_btn.setObjectName("mode_btn")
-        send_btn.clicked.connect(self._send)
-        ib.addWidget(send_btn)
-
         vlay.addWidget(inp_bar)
         return cell
 
