@@ -1,6 +1,5 @@
 """
 ui/main_window.py
-Layout: sidebar sinistra (stats/info) + area chat destra, stile terminale.
 """
 
 import os
@@ -8,8 +7,7 @@ import datetime
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QTextEdit, QLineEdit, QPushButton, QFrame,
-    QScrollArea
+    QLabel, QTextEdit, QLineEdit, QPushButton, QFrame
 )
 from PyQt6.QtCore  import Qt, QThread, pyqtSignal, QTimer, QUrl
 from PyQt6.QtGui   import (
@@ -23,27 +21,30 @@ from ui.widgets import StatusBar
 
 try:
     import psutil as _psutil
+    # pre-call per inizializzare il campionamento (evita 0.0 al primo tick)
+    _psutil.cpu_percent(interval=None)
 except ImportError:
     _psutil = None
 
 
-# ── Font ────────────────────────────────────────────────────────────────────────
+# ── Registra Space Mono ──────────────────────────────────────────────────
 
 def _register_fonts():
     base = os.path.normpath(
         os.path.join(os.path.dirname(__file__), "..", "assets")
     )
     for fname in (
-        "SpaceMono-Regular.ttf", "SpaceMono-Bold.ttf",
-        "SpaceMono-Italic.ttf",  "SpaceMono-BoldItalic.ttf",
+        "SpaceMono-Regular.ttf",
+        "SpaceMono-Bold.ttf",
+        "SpaceMono-Italic.ttf",
+        "SpaceMono-BoldItalic.ttf",
     ):
         p = os.path.join(base, fname)
         if os.path.exists(p):
             QFontDatabase.addApplicationFont(p)
 
 _register_fonts()
-_FF  = "'Space Mono','Courier New',monospace"
-_FONT_FAMILY   = "Space Mono"
+_FONT_FAMILY = "Space Mono"
 _FONT_FALLBACK = "Courier New"
 
 
@@ -56,61 +57,66 @@ def _mono(size: int = 12, bold: bool = False) -> QFont:
     return f
 
 
-# ── Stylesheet ────────────────────────────────────────────────────────────────
+# ── Stylesheet ───────────────────────────────────────────────────────────────
 
 def _ss(C):
+    fm = f"'{_FONT_FAMILY}', '{_FONT_FALLBACK}', monospace"
     return f"""
 * {{
     background-color: {C['bg']};
     color: {C['mid']};
-    font-family: {_FF};
+    font-family: {fm};
     font-size: 12px;
     border: none;
     outline: none;
 }}
+QFrame#cell {{
+    background-color: {C['bg1']};
+    border: 1px solid {C['border']};
+}}
 QTextEdit#log {{
     background-color: {C['bg']};
     color: {C['hi']};
-    font-family: {_FF};
+    font-family: {fm};
     font-size: 12px;
-    padding: 16px 20px;
+    padding: 14px;
     border: none;
 }}
 QLineEdit#inp {{
     background-color: {C['bg']};
     color: {C['hi']};
-    font-family: {_FF};
-    font-size: 12px;
-    padding: 0 14px;
+    font-family: {fm};
+    font-size: 13px;
+    padding: 10px 14px;
     border: none;
+    border-top: 1px solid {C['border']};
 }}
-QLineEdit#inp:focus {{ border: none; }}
+QLineEdit#inp:focus {{ border-top: 1px solid {C['hi']}; }}
+QPushButton#btn {{
+    background: transparent; color: {C['dim']};
+    font-family: {fm}; font-size: 9px; letter-spacing: 1px;
+    padding: 3px 8px; border: 1px solid {C['border']};
+}}
+QPushButton#btn:hover {{ color: {C['hi']}; border: 1px solid {C['hi']}; }}
 QPushButton#send_btn {{
-    background: transparent;
-    color: {C['hi']};
-    font-family: {_FF};
-    font-size: 10px;
-    letter-spacing: 2px;
-    padding: 0 18px;
-    border-left: 1px solid {C['border']};
-    min-width: 70px;
+    background: transparent; color: {C['hi']};
+    font-family: {fm}; font-size: 10px; letter-spacing: 3px;
+    padding: 10px 22px; border: 1px solid {C['hi']}; min-width: 80px;
 }}
 QPushButton#send_btn:hover {{ background: {C['hi']}; color: {C['bg']}; }}
-QPushButton#icon_btn {{
-    background: transparent;
-    color: {C['dim']};
-    font-family: {_FF};
-    font-size: 9px;
-    letter-spacing: 1px;
-    padding: 2px 8px;
-    border: 1px solid {C['border']};
+QPushButton#send_btn:pressed {{
+    background: {C['mid']}; border-color: {C['mid']}; color: {C['bg']};
 }}
-QPushButton#icon_btn:hover {{ color: {C['hi']}; border-color: {C['hi']}; }}
-QScrollBar:vertical {{ background: {C['bg']}; width: 2px; margin: 0; }}
+QPushButton#back_btn {{
+    background: transparent; color: {C['dim']};
+    font-family: {fm}; font-size: 9px; letter-spacing: 2px;
+    padding: 3px 10px; border: 1px solid {C['border']};
+}}
+QPushButton#back_btn:hover {{ color: {C['mid']}; border-color: {C['mid']}; }}
+QScrollBar:vertical {{ background: {C['bg']}; width: 3px; margin: 0; }}
 QScrollBar::handle:vertical {{ background: {C['dim']}; min-height: 20px; }}
 QScrollBar::handle:vertical:hover {{ background: {C['hi']}; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar:horizontal {{ height: 0; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 """
 
 
@@ -133,12 +139,13 @@ class WorkerThread(QThread):
             self.error_occurred.emit(str(e))
 
 
-# ── LogWriter / Typewriter ────────────────────────────────────────────────────
+# ── Log writer ───────────────────────────────────────────────────────────────
 
 class LogWriter:
     def __init__(self, log: QTextEdit, C: dict):
         self._log = log
         self.C    = C
+        self._font_size = 12
 
     def _fmt(self, hex_color: str, bold: bool = False) -> QTextCharFormat:
         fmt = QTextCharFormat()
@@ -146,12 +153,12 @@ class LogWriter:
         f = QFont(_FONT_FAMILY)
         if not f.exactMatch():
             f = QFont(_FONT_FALLBACK)
-        f.setPixelSize(12)
+        f.setPixelSize(self._font_size)
         f.setBold(bold)
         fmt.setFont(f)
         return fmt
 
-    def append_line(self, segments: list) -> None:
+    def append_line(self, segments: list[tuple[str, str, bool]]) -> None:
         doc = self._log.document()
         cur = QTextCursor(doc)
         cur.movePosition(QTextCursor.MoveOperation.End)
@@ -161,7 +168,9 @@ class LogWriter:
             cur.insertText(text, self._fmt(color, bold))
         self._scroll()
 
-    def start_typewriter_line(self, prefix_segments: list) -> int:
+    def start_typewriter_line(
+        self, prefix_segments: list[tuple[str, str, bool]]
+    ) -> int:
         doc = self._log.document()
         cur = QTextCursor(doc)
         cur.movePosition(QTextCursor.MoveOperation.End)
@@ -197,7 +206,12 @@ class Typewriter:
         self._timer.timeout.connect(self._tick)
         self.on_finished = None
 
-    def start(self, prefix_segments: list, full_text: str, speed_ms: int = 14):
+    def start(
+        self,
+        prefix_segments: list[tuple[str, str, bool]],
+        full_text: str,
+        speed_ms: int = 14,
+    ):
         self._text   = full_text
         self._pos    = 0
         self._anchor = self._w.start_typewriter_line(prefix_segments)
@@ -209,14 +223,53 @@ class Typewriter:
     def _tick(self):
         if self._pos < len(self._text):
             self._pos += 1
-            self._w.overwrite_from(self._anchor, self._text[:self._pos], self.C["hi"])
+            self._w.overwrite_from(
+                self._anchor,
+                self._text[: self._pos],
+                self.C["hi"],
+            )
         else:
             self._timer.stop()
             if self.on_finished:
                 self.on_finished()
 
 
-# ── RazeWindow ────────────────────────────────────────────────────────────────
+def _cell_header(label: str, C: dict, right_widget=None) -> QWidget:
+    hdr = QWidget()
+    hdr.setFixedHeight(24)
+    hdr.setStyleSheet(
+        f"background:{C['bg1']}; border-bottom:1px solid {C['border']};"
+    )
+    hl = QHBoxLayout(hdr)
+    hl.setContentsMargins(10, 0, 8, 0)
+    hl.setSpacing(6)
+    lbl = QLabel(label)
+    lbl.setStyleSheet(
+        f"color:{C['dim']}; font-size:9px; letter-spacing:2px; "
+        f"background:transparent; border:none;"
+    )
+    hl.addWidget(lbl)
+    hl.addStretch()
+    if right_widget:
+        hl.addWidget(right_widget)
+    return hdr
+
+
+# ── CpuRamThread ────────────────────────────────────────────────────────────
+
+class _SysPoller(QThread):
+    """Legge CPU (con interval=0.5) e RAM in un thread, senza bloccare la UI."""
+    ready = pyqtSignal(str, str)  # cpu_str, ram_str
+
+    def run(self):
+        try:
+            cpu = _psutil.cpu_percent(interval=0.5)
+            ram = _psutil.virtual_memory()
+            ram_gb = ram.used / (1024 ** 3)
+            self.ready.emit(f"{cpu:.0f}%", f"{ram_gb:.1f} GB")
+        except Exception:
+            self.ready.emit("err", "err")
+
 
 class RazeWindow(QMainWindow):
     back_requested = pyqtSignal()
@@ -225,8 +278,8 @@ class RazeWindow(QMainWindow):
         super().__init__()
         self.C = get()
         self.setWindowTitle("RAZE")
-        self.setMinimumSize(860, 580)
-        self.resize(1060, 680)
+        self.setMinimumSize(900, 640)
+        self.resize(1020, 700)
         self.setStyleSheet(_ss(self.C))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self._drag_pos  = None
@@ -234,7 +287,7 @@ class RazeWindow(QMainWindow):
         self._worker    = None
         self._closing   = False
         self._msg_count = 0
-        self._busy      = False
+        self._sys_poller = None
 
         from core.llm import Conversation
         self._conv = Conversation()
@@ -253,18 +306,12 @@ class RazeWindow(QMainWindow):
 
         self._sys_timer = QTimer(self)
         self._sys_timer.timeout.connect(self._update_sys)
-        self._sys_timer.start(2000)
+        self._sys_timer.start(3000)
         self._update_sys()
 
         self._lw.append_line([
-            ("RAZE ── TEXT_MODE", self.C["hi"], True),
+            ("RAZE // TEXT_MODE — ready. type a message and press ENTER.", self.C["dim"], False)
         ])
-        self._lw.append_line([
-            ("ready. type a message below.", self.C["dim"], False),
-        ])
-        self._lw.append_line([(" ", self.C["dim"], False)])
-
-    # ── Build ───────────────────────────────────────────────────────────────
 
     def _build(self):
         root = QWidget()
@@ -272,298 +319,200 @@ class RazeWindow(QMainWindow):
         vlay = QVBoxLayout(root)
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
-
         vlay.addWidget(self._make_titlebar())
 
-        # ─ body: sidebar | divider | chat area
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
-        body.addWidget(self._make_sidebar(), stretch=0)
-        body.addWidget(self._hdivider())
-        body.addWidget(self._make_chat_area(), stretch=1)
-        vlay.addLayout(body, stretch=1)
 
+        left_col = QVBoxLayout()
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(0)
+        left_col.addWidget(self._make_video_cell(), stretch=3)
+        left_col.addWidget(self._make_sys_cell(),   stretch=2)
+        left_wrap = QWidget()
+        left_wrap.setLayout(left_col)
+
+        body.addWidget(left_wrap, stretch=2)
+        body.addWidget(self._vdivider())
+        body.addWidget(self._make_log_cell(), stretch=3)
+
+        vlay.addLayout(body, stretch=1)
         self._statusbar = StatusBar(self.C)
         vlay.addWidget(self._statusbar)
 
-    # ── Title bar ────────────────────────────────────────────────────────────
-
     def _make_titlebar(self):
         bar = QWidget()
-        bar.setFixedHeight(36)
+        bar.setFixedHeight(34)
         bar.setStyleSheet(
             f"background:{self.C['bg1']}; border-bottom:1px solid {self.C['border']};"
         )
         hl = QHBoxLayout(bar)
-        hl.setContentsMargins(14, 0, 8, 0)
+        hl.setContentsMargins(14, 0, 6, 0)
         hl.setSpacing(0)
 
-        # logo
-        logo = QLabel("RAZE")
-        logo.setStyleSheet(
-            f"color:{self.C['hi']}; font-size:13px; letter-spacing:6px;"
-            f" font-weight:bold; background:transparent; border:none; padding-right:20px;"
-        )
-        hl.addWidget(logo)
+        for col in ["#3a3a3a", "#3a3a3a", "#3a3a3a"]:
+            dot = QLabel("●")
+            dot.setStyleSheet(
+                f"color:{col}; font-size:9px; background:transparent; border:none; padding:0 3px;"
+            )
+            hl.addWidget(dot)
 
-        # tab attivo
-        tab = QLabel("TEXT_MODE")
-        tab.setFixedHeight(36)
-        tab.setStyleSheet(
-            f"color:{self.C['hi']}; font-size:10px; letter-spacing:3px;"
-            f" background:{self.C['bg']}; border:none;"
-            f" padding: 0 18px;"
-            f" border-right: 1px solid {self.C['border']};"
+        hl.addSpacing(12)
+        title = QLabel("RAZE  //  TEXT_MODE")
+        title.setStyleSheet(
+            f"color:{self.C['hi']}; font-size:10px; letter-spacing:5px; background:transparent; border:none;"
         )
-        hl.addWidget(tab)
-
+        hl.addWidget(title)
         hl.addStretch()
 
-        # status pill
         self._status_title = QLabel("■ STANDBY")
         self._status_title.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:9px; letter-spacing:3px;"
-            f" background:transparent; border:none; padding-right:16px;"
+            f"color:{self.C['dim']}; font-size:9px; letter-spacing:3px; background:transparent; border:none;"
         )
         hl.addWidget(self._status_title)
+        hl.addSpacing(16)
 
-        # back
         back_btn = QPushButton("◀ MODE")
-        back_btn.setObjectName("icon_btn")
+        back_btn.setObjectName("back_btn")
         back_btn.setFixedHeight(22)
         back_btn.clicked.connect(self._go_back)
         hl.addWidget(back_btn)
-        hl.addSpacing(10)
+        hl.addSpacing(8)
 
-        # wm buttons
-        for sym, slot in [("–", self.showMinimized), ("□", self._toggle_max), ("×", self.close)]:
+        for sym, slot in [("—", self.showMinimized), ("□", self._toggle_max), ("×", self.close)]:
             b = QPushButton(sym)
-            b.setFixedSize(28, 28)
+            b.setFixedSize(26, 26)
             b.setStyleSheet(
-                f"QPushButton{{background:transparent;color:{self.C['dim']};border:none;font-size:13px;}}"
+                f"QPushButton{{background:transparent;color:{self.C['dim']};border:none;font-size:13px;font-family:'{_FONT_FAMILY}','{_FONT_FALLBACK}';}}"
                 f"QPushButton:hover{{color:{self.C['hi']};background:{self.C['border']};}}"
             )
             b.clicked.connect(slot)
             hl.addWidget(b)
         return bar
 
-    # ── Sidebar ─────────────────────────────────────────────────────────────
-
-    def _make_sidebar(self):
-        sb = QWidget()
-        sb.setFixedWidth(220)
-        sb.setStyleSheet(f"background:{self.C['bg1']}; border:none;")
-        lay = QVBoxLayout(sb)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        # ─ video preview
-        vid_wrap = QWidget()
-        vid_wrap.setFixedHeight(160)
-        vid_wrap.setStyleSheet(f"background:{self.C['bg']}; border-bottom:1px solid {self.C['border']};")
-        self.vid = QVideoWidget(vid_wrap)
+    def _make_video_cell(self):
+        cell = QFrame()
+        cell.setObjectName("cell")
+        vlay = QVBoxLayout(cell)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+        vlay.addWidget(_cell_header("VISUAL_OUTPUT", self.C))
+        vc = QWidget()
+        vc.setStyleSheet(f"background:{self.C['bg']}; border:none;")
+        self.vid = QVideoWidget(vc)
         self.vid.setStyleSheet(f"background:{self.C['bg']};")
-        self.vid_placeholder = QLabel(vid_wrap)
+        self.vid_placeholder = QLabel(vc)
         self.vid_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.vid_placeholder.setStyleSheet(
-            f"color:{self.C['dim']}; background:transparent; border:none; font-family:{_FF};"
-        )
         self.vid_placeholder.hide()
         def _r(e):
-            self.vid.setGeometry(vid_wrap.rect())
-            self.vid_placeholder.setGeometry(vid_wrap.rect())
-        vid_wrap.resizeEvent = _r
-        lay.addWidget(vid_wrap)
+            self.vid.setGeometry(vc.rect())
+            self.vid_placeholder.setGeometry(vc.rect())
+        vc.resizeEvent = _r
+        vlay.addWidget(vc, stretch=1)
+        return cell
 
-        # ─ sezione stats
-        lay.addWidget(self._sb_section("SYSTEM"))
+    def _make_sys_cell(self):
+        cell = QFrame()
+        cell.setObjectName("cell")
+        cell.setStyleSheet(
+            f"QFrame#cell{{background:{self.C['bg1']}; border:1px solid {self.C['border']}; border-top:none;}}"
+        )
+        vlay = QVBoxLayout(cell)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+        vlay.addWidget(_cell_header("SYSTEM_STATS", self.C))
+        content = QWidget()
+        content.setStyleSheet(f"background:{self.C['bg1']}; border:none;")
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(14, 10, 14, 10)
+        cl.setSpacing(7)
         self._sys_labels = {}
         for key, val in [
-            ("STATUS",  "STANDBY"),
-            ("THEME",   self.C["name"].upper()),
-            ("MSGS",    "0"),
-            ("CPU",     "—"),
-            ("RAM",     "—"),
-            ("TIME",    "—"),
+            ("STATUS", "STANDBY"), ("MODE", "TEXT"),
+            ("THEME", self.C["name"].upper()), ("MSGS", "0"),
+            ("CPU", "loading..."), ("RAM", "loading..."), ("TIME", "—"),
         ]:
-            row = self._sb_row(key, val)
-            lay.addWidget(row)
-            self._sys_labels[key] = row._val_lbl
+            row = QHBoxLayout()
+            row.setSpacing(0)
+            k = QLabel(key)
+            k.setStyleSheet(
+                f"color:{self.C['dim']}; font-size:9px; letter-spacing:2px; background:transparent; border:none;"
+            )
+            v = QLabel(val)
+            v.setAlignment(Qt.AlignmentFlag.AlignRight)
+            v.setStyleSheet(
+                f"color:{self.C['mid']}; font-size:9px; letter-spacing:1px; background:transparent; border:none;"
+            )
+            row.addWidget(k)
+            row.addStretch()
+            row.addWidget(v)
+            cl.addLayout(row)
+            self._sys_labels[key] = v
+        cl.addStretch()
+        vlay.addWidget(content, stretch=1)
+        return cell
 
-        lay.addWidget(self._sb_divider())
-
-        # ─ sezione session
-        lay.addWidget(self._sb_section("SESSION"))
-        self._session_log = QTextEdit()
-        self._session_log.setReadOnly(True)
-        self._session_log.setFont(_mono(9))
-        self._session_log.setFixedHeight(120)
-        self._session_log.setStyleSheet(
-            f"background:{self.C['bg1']}; color:{self.C['dim']};"
-            f" font-family:{_FF}; font-size:9px; padding:6px 10px; border:none;"
+    def _make_log_cell(self):
+        cell = QFrame()
+        cell.setObjectName("cell")
+        cell.setStyleSheet(
+            f"QFrame#cell{{background:{self.C['bg']}; border:1px solid {self.C['border']}; border-left:none;}}"
         )
-        lay.addWidget(self._session_log)
-
-        lay.addWidget(self._sb_divider())
-
-        # ─ clear button
-        clr = QPushButton("CLR MEMORY")
-        clr.setObjectName("icon_btn")
-        clr.setFixedHeight(28)
-        clr.setStyleSheet(
-            f"QPushButton#icon_btn{{"
-            f"background:transparent; color:{self.C['dim']};"
-            f" font-family:{_FF}; font-size:9px; letter-spacing:2px;"
-            f" border-top:1px solid {self.C['border']}; border-bottom:1px solid {self.C['border']};"
-            f" border-left:none; border-right:none; padding:0 10px;"
-            f"}}"
-            f"QPushButton#icon_btn:hover{{color:{self.C['hi']};}}"
-        )
-        clr.clicked.connect(self._clear_log)
-        lay.addWidget(clr)
-
-        lay.addStretch()
-
-        # ─ footer sidebar
-        footer = QLabel("RAZE v0.1-dev")
-        footer.setFixedHeight(28)
-        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:8px; letter-spacing:2px;"
-            f" background:{self.C['bg1']}; border-top:1px solid {self.C['border']}; border:none;"
-            f" border-top:1px solid {self.C['border']};"
-        )
-        lay.addWidget(footer)
-        return sb
-
-    def _sb_section(self, title: str) -> QWidget:
-        w = QWidget()
-        w.setFixedHeight(22)
-        w.setStyleSheet(f"background:{self.C['bg1']}; border-bottom:1px solid {self.C['border']};")
-        l = QHBoxLayout(w)
-        l.setContentsMargins(10, 0, 10, 0)
-        lbl = QLabel(title)
-        lbl.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:8px; letter-spacing:3px; background:transparent; border:none;"
-        )
-        l.addWidget(lbl)
-        l.addStretch()
-        return w
-
-    def _sb_row(self, key: str, val: str) -> QWidget:
-        w = QWidget()
-        w.setFixedHeight(22)
-        w.setStyleSheet(f"background:{self.C['bg1']};")
-        hl = QHBoxLayout(w)
-        hl.setContentsMargins(10, 0, 10, 0)
-        hl.setSpacing(0)
-        k = QLabel(key)
-        k.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:9px; letter-spacing:1px; background:transparent; border:none;"
-        )
-        v = QLabel(val)
-        v.setAlignment(Qt.AlignmentFlag.AlignRight)
-        v.setStyleSheet(
-            f"color:{self.C['mid']}; font-size:9px; background:transparent; border:none;"
-        )
-        hl.addWidget(k)
-        hl.addStretch()
-        hl.addWidget(v)
-        w._val_lbl = v
-        return w
-
-    def _sb_divider(self) -> QWidget:
-        d = QWidget()
-        d.setFixedHeight(1)
-        d.setStyleSheet(f"background:{self.C['border']};")
-        return d
-
-    # ── Chat area ───────────────────────────────────────────────────────────
-
-    def _make_chat_area(self):
-        wrap = QWidget()
-        wrap.setStyleSheet(f"background:{self.C['bg']}; border:none;")
-        vlay = QVBoxLayout(wrap)
+        vlay = QVBoxLayout(cell)
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
 
-        # chat sub-header
-        subhdr = QWidget()
-        subhdr.setFixedHeight(28)
-        subhdr.setStyleSheet(
-            f"background:{self.C['bg1']}; border-bottom:1px solid {self.C['border']};"
-        )
-        shl = QHBoxLayout(subhdr)
-        shl.setContentsMargins(16, 0, 12, 0)
-        path_lbl = QLabel("OUTPUT_LOG")
-        path_lbl.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:9px; letter-spacing:2px;"
-            f" background:transparent; border:none;"
-        )
-        shl.addWidget(path_lbl)
-        shl.addStretch()
-        line_lbl = QLabel("MSGS: 0")
-        line_lbl.setStyleSheet(
-            f"color:{self.C['dim']}; font-size:9px; background:transparent; border:none;"
-        )
-        self._msgs_lbl = line_lbl
-        shl.addWidget(line_lbl)
-        vlay.addWidget(subhdr)
+        clr_btn = QPushButton("CLR")
+        clr_btn.setObjectName("btn")
+        clr_btn.setFixedSize(32, 16)
+        clr_btn.clicked.connect(self._clear_log)
+        vlay.addWidget(_cell_header("OUTPUT_LOG", self.C, clr_btn))
 
-        # log
         self.log = QTextEdit()
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
         self.log.setFont(_mono(12))
         vlay.addWidget(self.log, stretch=1)
 
-        # input bar
-        vlay.addWidget(self._make_input_bar())
-        return wrap
+        sep = QWidget()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background:{self.C['border']};")
+        vlay.addWidget(sep)
 
-    def _make_input_bar(self):
-        bar = QWidget()
-        bar.setFixedHeight(44)
-        bar.setStyleSheet(
-            f"background:{self.C['bg1']};"
-            f" border-top:1px solid {self.C['border']};"
-        )
-        hl = QHBoxLayout(bar)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(0)
+        inp_bar = QWidget()
+        inp_bar.setFixedHeight(46)
+        inp_bar.setStyleSheet(f"background:{self.C['bg1']}; border:none;")
+        ib = QHBoxLayout(inp_bar)
+        ib.setContentsMargins(0, 0, 0, 0)
+        ib.setSpacing(0)
 
-        prompt = QLabel("  ❯_  ")
-        prompt.setFixedWidth(44)
-        prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        prompt.setStyleSheet(
-            f"color:{self.C['hi']}; font-size:13px;"
-            f" background:{self.C['bg1']}; border-right:1px solid {self.C['border']};"
-            f" border:none; border-right:1px solid {self.C['border']};"
+        prompt_lbl = QLabel("  >_  ")
+        prompt_lbl.setStyleSheet(
+            f"color:{self.C['hi']}; font-size:13px; background:{self.C['bg1']}; border:none; border-right:1px solid {self.C['border']}; padding:0 8px;"
         )
-        hl.addWidget(prompt)
+        ib.addWidget(prompt_lbl)
 
         self.inp = QLineEdit()
         self.inp.setObjectName("inp")
-        self.inp.setFont(_mono(12))
+        self.inp.setFont(_mono(13))
         self.inp.setPlaceholderText("insert command...")
         self.inp.returnPressed.connect(self._send)
-        hl.addWidget(self.inp, stretch=1)
+        ib.addWidget(self.inp, stretch=1)
 
         send_btn = QPushButton("SEND")
         send_btn.setObjectName("send_btn")
-        send_btn.setFixedHeight(44)
         send_btn.clicked.connect(self._send)
-        hl.addWidget(send_btn)
-        return bar
+        ib.addWidget(send_btn)
 
-    def _hdivider(self):
+        vlay.addWidget(inp_bar)
+        return cell
+
+    def _vdivider(self):
         d = QFrame()
         d.setFixedWidth(1)
         d.setStyleSheet(f"background:{self.C['border']}; border:none;")
         return d
-
-    # ── Video ────────────────────────────────────────────────────────────────
 
     def _load_video(self):
         base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
@@ -612,23 +561,18 @@ class RazeWindow(QMainWindow):
     def _set_thinking(self, on: bool):
         self._play_video(self._vid_thinking if on else self._vid_idle)
 
-    # ── Logic ─────────────────────────────────────────────────────────────────
-
     def _send(self):
         text = self.inp.text().strip()
-        if not text or self._closing or self._busy:
+        if not text or self._closing:
             return
-        self._busy = True
         self.inp.clear()
         self.inp.setEnabled(False)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
 
         self._lw.append_line([
             (f"[{ts}] ", self.C["dim"], False),
-            (f"> ", self.C["dim"], False),
-            (text, self.C["mid"], False),
+            (f"> {text}", self.C["mid"], False),
         ])
-        self._session_log.append(f"> {text[:30]}{'...' if len(text) > 30 else ''}")
 
         self._set_status("PROCESSING")
         self._set_sys("STATUS", "PROCESSING")
@@ -650,28 +594,23 @@ class RazeWindow(QMainWindow):
         self._set_sys("STATUS", "RESPONDING")
         self._msg_count += 1
         self._set_sys("MSGS", str(self._msg_count))
-        self._msgs_lbl.setText(f"MSGS: {self._msg_count}")
         self._statusbar.inc_messages()
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self._session_log.append(f"< {text[:30]}{'...' if len(text) > 30 else ''}")
 
         self._tw.start(
-            prefix_segments=[(f"[{ts}] RAZE ❯ ", self.C["dim"], False)],
+            prefix_segments=[(f"[{ts}] RAZE> ", self.C["dim"], False)],
             full_text=text,
         )
 
     def _on_typewriter_done(self):
         if self._closing:
             return
-        self._busy = False
-        self._lw.append_line([(" ", self.C["dim"], False)])
         self._set_status("STANDBY")
         self._set_sys("STATUS", "STANDBY")
 
     def _on_err(self, err):
         if self._closing:
             return
-        self._busy = False
         self._set_thinking(False)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._lw.append_line([
@@ -683,15 +622,10 @@ class RazeWindow(QMainWindow):
 
     def _clear_log(self):
         self.log.clear()
-        self._session_log.clear()
         self._conv.clear()
         self._msg_count = 0
         self._set_sys("MSGS", "0")
-        self._msgs_lbl.setText("MSGS: 0")
         self._lw.append_line([("// memory cleared — ready", self.C["dim"], False)])
-        self._lw.append_line([(" ", self.C["dim"], False)])
-
-    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _set_status(self, text):
         self._status_title.setText(f"■ {text}")
@@ -706,12 +640,17 @@ class RazeWindow(QMainWindow):
             return
         self._set_sys("TIME", datetime.datetime.now().strftime("%H:%M:%S"))
         self._set_sys("THEME", self.C["name"].upper())
-        try:
-            if _psutil is not None:
-                self._set_sys("CPU", f"{_psutil.cpu_percent(interval=None):.0f}%")
-                self._set_sys("RAM", f"{_psutil.virtual_memory().used/(1024**3):.1f} GB")
-        except Exception:
-            pass
+        # CPU e RAM in thread separato per non bloccare la UI
+        if _psutil is not None and (self._sys_poller is None or not self._sys_poller.isRunning()):
+            self._sys_poller = _SysPoller()
+            self._sys_poller.ready.connect(self._on_sys_ready)
+            self._sys_poller.start()
+
+    def _on_sys_ready(self, cpu: str, ram: str):
+        if self._closing:
+            return
+        self._set_sys("CPU", cpu)
+        self._set_sys("RAM", ram)
 
     def _blink(self):
         if self._closing:
@@ -719,9 +658,6 @@ class RazeWindow(QMainWindow):
         if "STANDBY" in self._status_title.text():
             self._blink_state = not self._blink_state
             self._status_title.setText("■ STANDBY" if self._blink_state else "□ STANDBY")
-
-    def _toggle_max(self):
-        self.showNormal() if self.isMaximized() else self.showMaximized()
 
     def _go_back(self):
         self._closing = True
@@ -731,8 +667,10 @@ class RazeWindow(QMainWindow):
         if self._worker and self._worker.isRunning():
             self._worker.wait(2000)
         if self._player:
-            try: self._player.stop()
-            except Exception: pass
+            try:
+                self._player.stop()
+            except Exception:
+                pass
         self.back_requested.emit()
         self.close()
 
@@ -744,8 +682,10 @@ class RazeWindow(QMainWindow):
         if self._worker and self._worker.isRunning():
             self._worker.wait(3000)
         if self._player:
-            try: self._player.stop()
-            except Exception: pass
+            try:
+                self._player.stop()
+            except Exception:
+                pass
         super().closeEvent(e)
 
     def mousePressEvent(self, e):
@@ -759,3 +699,6 @@ class RazeWindow(QMainWindow):
 
     def mouseReleaseEvent(self, e):
         self._drag_pos = None
+
+    def _toggle_max(self):
+        self.showNormal() if self.isMaximized() else self.showMaximized()
