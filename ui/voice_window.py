@@ -1,6 +1,5 @@
 """
 ui/voice_window.py - Modalità voce RAZE
-Con waveform ASCII, mic level, trascrizione parziale
 """
 
 import os
@@ -15,7 +14,7 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtGui   import QFontDatabase
 
 from ui.theme   import get
-from ui.widgets import MicLevelBar, WaveformWidget, StatusBar, MicMonitor
+from ui.widgets import MicLevelBar, WaveformWidget, MicMonitor
 
 
 # ── Font ─────────────────────────────────────────────────────────────────────
@@ -74,6 +73,44 @@ QSlider::sub-page:horizontal {{ background: {C['hi']}; }}
 """
 
 
+# ── StatusBar locale ────────────────────────────────────────────────────────────
+
+class StatusBar(QWidget):
+    """Pannello di stato per VoiceWindow, definito localmente."""
+
+    def __init__(self, C: dict):
+        super().__init__()
+        self.C = C
+        self._messages = 0
+        self.setFixedHeight(26)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 0, 14, 0)
+        lay.setSpacing(16)
+        self.setStyleSheet(
+            f"background:{C['bg1']}; border-top:1px solid {C['border']};"
+        )
+        self._status_lbl = QLabel("STANDBY")
+        self._status_lbl.setStyleSheet(
+            f"color:{C['dim']}; font-size:9px; letter-spacing:2px;"
+            f" background:transparent; border:none;"
+        )
+        lay.addWidget(self._status_lbl)
+        lay.addStretch()
+        self._msg_lbl = QLabel("MSGS 0")
+        self._msg_lbl.setStyleSheet(
+            f"color:{C['dim']}; font-size:9px; letter-spacing:1px;"
+            f" background:transparent; border:none;"
+        )
+        lay.addWidget(self._msg_lbl)
+
+    def set_status(self, text: str):
+        self._status_lbl.setText(text)
+
+    def inc_messages(self):
+        self._messages += 1
+        self._msg_lbl.setText(f"MSGS {self._messages}")
+
+
 # ── Model loader thread ───────────────────────────────────────────────────────
 
 class ModelLoaderThread(QThread):
@@ -114,14 +151,12 @@ class VoiceSettingsDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 20, 20, 20)
         lay.setSpacing(12)
-
         hdr = QLabel("> VOICE_CONFIG")
         hdr.setStyleSheet(
             f"color:{C['hi']}; font-size:13px; letter-spacing:4px;"
             f" padding-bottom:10px; border-bottom:1px solid {C['border']};"
         )
         lay.addWidget(hdr)
-
         for attr, label in [
             ("in_combo",  "INPUT // MICROPHONE"),
             ("out_combo", "OUTPUT // SPEAKER"),
@@ -130,28 +165,26 @@ class VoiceSettingsDialog(QDialog):
             combo = QComboBox()
             setattr(self, attr, combo)
             lay.addWidget(combo)
-
         self.in_combo.currentIndexChanged.connect(self._on_in)
         self.out_combo.currentIndexChanged.connect(self._on_out)
-
         lay.addWidget(self._lbl("TTS // VOICE MODEL"))
         self.voice_combo = QComboBox()
         lay.addWidget(self.voice_combo)
-
         lay.addWidget(self._lbl("TTS // SPEED"))
         row = QHBoxLayout()
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(50, 200)
         self.speed_slider.setValue(100)
         self.speed_val = QLabel("1.0x")
-        self.speed_val.setStyleSheet(f"color:{C['hi']}; min-width:36px; background:transparent;")
+        self.speed_val.setStyleSheet(
+            f"color:{C['hi']}; min-width:36px; background:transparent;"
+        )
         self.speed_slider.valueChanged.connect(
             lambda v: self.speed_val.setText(f"{v/100:.1f}x")
         )
         row.addWidget(self.speed_slider)
         row.addWidget(self.speed_val)
         lay.addLayout(row)
-
         lay.addStretch()
         row2 = QHBoxLayout()
         row2.addStretch()
@@ -178,7 +211,6 @@ class VoiceSettingsDialog(QDialog):
             self._out_devs = [(i, d["name"]) for i, d in devs if d["max_output_channels"] > 0]
         except Exception:
             pass
-
         for combo, devs, cur in [
             (self.in_combo,  self._in_devs,  self.selected_input),
             (self.out_combo, self._out_devs, self.selected_output),
@@ -196,7 +228,6 @@ class VoiceSettingsDialog(QDialog):
                 else:
                     self.selected_output = devs[sel][0]
             combo.blockSignals(False)
-
         try:
             from core.tts import TTSEngine
             self._models = TTSEngine.list_models()
@@ -252,25 +283,23 @@ class VoiceWindow(QMainWindow):
         self._build()
         self._load_video()
 
-        # ── TTS init (con fallback) ──────────────────────────────────────────
+        # ── TTS (con fallback) ────────────────────────────────────────────
         try:
             from core.tts import TTSEngine
             self._tts = TTSEngine()
             self._tts.speech_finished.connect(self._on_tts_done)
         except Exception as e:
             print(f"[RAZE] TTS non disponibile: {e}")
-            self._tts = None
 
-        # ── MicMonitor (con fallback) ────────────────────────────────────────
+        # ── MicMonitor (con fallback) ───────────────────────────────────────
         try:
             self._mic_monitor = MicMonitor(device_index=mic_in)
             self._mic_monitor.level_updated.connect(self._on_mic_level)
             self._mic_monitor.start_monitoring()
         except Exception as e:
             print(f"[RAZE] MicMonitor non disponibile: {e}")
-            self._mic_monitor = None
 
-        # ── STT model loader (con fallback) ──────────────────────────────────
+        # ── STT model loader (con fallback) ─────────────────────────────────
         self._set_status("CARICAMENTO MODELLO...")
         try:
             self._loader = ModelLoaderThread("small")
@@ -280,7 +309,7 @@ class VoiceWindow(QMainWindow):
         except Exception as e:
             self._on_model_error(str(e))
 
-    # ── Build UI ──────────────────────────────────────────────────────────────
+    # ── Build UI ────────────────────────────────────────────────────────────
 
     def _build(self):
         C = self.C
@@ -292,7 +321,7 @@ class VoiceWindow(QMainWindow):
         lay.addWidget(self._make_titlebar(C))
         lay.addWidget(self._make_video_area(C), stretch=1)
         lay.addWidget(self._make_waveform_bar(C))
-        lay.addWidget(self._make_status_bar(C))
+        lay.addWidget(self._make_status_panel(C))
         self._statusbar = StatusBar(C)
         lay.addWidget(self._statusbar)
 
@@ -359,7 +388,7 @@ class VoiceWindow(QMainWindow):
         wfl.addWidget(self._waveform)
         return wf_bar
 
-    def _make_status_bar(self, C):
+    def _make_status_panel(self, C):
         sb = QWidget()
         sb.setFixedHeight(72)
         sb.setStyleSheet(
@@ -368,7 +397,6 @@ class VoiceWindow(QMainWindow):
         sl = QVBoxLayout(sb)
         sl.setContentsMargins(16, 8, 16, 8)
         sl.setSpacing(4)
-
         self.status_lbl = QLabel("[ CARICAMENTO MODELLO... ]")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_lbl.setStyleSheet(
@@ -376,14 +404,12 @@ class VoiceWindow(QMainWindow):
             f" background:transparent; border:none;"
         )
         sl.addWidget(self.status_lbl)
-
         self.transcript_lbl = QLabel("")
         self.transcript_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.transcript_lbl.setStyleSheet(
             f"color:{C['dim']}; font-size:10px; background:transparent; border:none;"
         )
         sl.addWidget(self.transcript_lbl)
-
         mic_row = QHBoxLayout()
         mic_row.setContentsMargins(0, 0, 0, 0)
         mic_lbl = QLabel("MIC ")
@@ -397,7 +423,7 @@ class VoiceWindow(QMainWindow):
         sl.addLayout(mic_row)
         return sb
 
-    # ── Video ─────────────────────────────────────────────────────────────────
+    # ── Video ───────────────────────────────────────────────────────────────
 
     def _load_video(self):
         base = os.path.normpath(
@@ -406,10 +432,7 @@ class VoiceWindow(QMainWindow):
         self._vid_idle     = os.path.join(base, "raze_white.mp4")
         self._vid_thinking = os.path.join(base, "loading.mp4")
         if not os.path.exists(self._vid_idle):
-            self.vid.hide()
-            self.vid_ph.show()
-            self.vid_ph.setText("[ NO VIDEO ]")
-            return
+            self.vid.hide(); self.vid_ph.show(); self.vid_ph.setText("[ NO VIDEO ]"); return
         try:
             self._player = QMediaPlayer(self)
             self._ao = QAudioOutput(self)
@@ -420,30 +443,21 @@ class VoiceWindow(QMainWindow):
             self._play_video(self._vid_idle)
         except Exception as e:
             print(f"[RAZE] Voice video init error: {e}")
-            self._player = None
-            self.vid.hide()
-            self.vid_ph.show()
+            self._player = None; self.vid.hide(); self.vid_ph.show()
 
     def _play_video(self, path: str):
-        if self._player is None:
-            return
-        if not os.path.exists(path):
-            path = self._vid_idle
+        if self._player is None: return
+        if not os.path.exists(path): path = self._vid_idle
         try:
-            self._player.setSource(QUrl.fromLocalFile(path))
-            self._player.play()
+            self._player.setSource(QUrl.fromLocalFile(path)); self._player.play()
         except Exception as e:
             print(f"[RAZE] Video play error: {e}")
 
     def _on_media(self, s):
-        if self._player is None or self._closing:
-            return
+        if self._player is None or self._closing: return
         if s == QMediaPlayer.MediaStatus.EndOfMedia:
-            try:
-                self._player.setPosition(0)
-                self._player.play()
-            except Exception:
-                pass
+            try: self._player.setPosition(0); self._player.play()
+            except Exception: pass
 
     def _set_thinking(self, on: bool):
         self._play_video(self._vid_thinking if on else self._vid_idle)
@@ -451,8 +465,7 @@ class VoiceWindow(QMainWindow):
     # ── Model loading ─────────────────────────────────────────────────────────
 
     def _on_model_ready(self):
-        if self._closing:
-            return
+        if self._closing: return
         self._model_ready = True
         self._set_status("LISTENING")
         self.transcript_lbl.setText("")
@@ -462,29 +475,25 @@ class VoiceWindow(QMainWindow):
         self._set_status("STT_ERROR")
         self.transcript_lbl.setText(err[:80] if err else "core.stt non disponibile")
 
-    # ── Mic ───────────────────────────────────────────────────────────────────
+    # ── Mic ──────────────────────────────────────────────────────────────────
 
     def _on_mic_level(self, level: float):
         self._mic_bar.set_level(level)
         self._waveform.push_level(level)
 
-    # ── STT loop ──────────────────────────────────────────────────────────────
+    # ── STT loop ────────────────────────────────────────────────────────────
 
     def _listen(self):
-        if self._busy or self._closing or not self._model_ready:
-            return
-        if self._listener and self._listener._running:
-            return
+        if self._busy or self._closing or not self._model_ready: return
+        if self._listener and self._listener._running: return
         if self._listener:
             try:
                 self._listener.phrase_ready.disconnect()
                 self._listener.error_occurred.disconnect()
-            except Exception:
-                pass
+            except Exception: pass
             self._old_listeners.append(self._listener)
             self._listener = None
         self._old_listeners = [l for l in self._old_listeners if l._running]
-
         try:
             from core.stt import PhraseListener
             self._listener = PhraseListener(device_index=self._mic_in)
@@ -498,18 +507,13 @@ class VoiceWindow(QMainWindow):
             self._on_stt_err(str(e))
 
     def _on_phrase(self, text: str):
-        try:
-            self._listener.phrase_ready.disconnect(self._on_phrase)
-        except Exception:
-            pass
-        if not text:
-            QTimer.singleShot(300, self._listen)
-            return
+        try: self._listener.phrase_ready.disconnect(self._on_phrase)
+        except Exception: pass
+        if not text: QTimer.singleShot(300, self._listen); return
         self._busy = True
         self.transcript_lbl.setText(f'"{text}"')
         self._set_status("THINKING")
         self._set_thinking(True)
-
         from ui.main_window import WorkerThread
         self._worker = WorkerThread(text, self._conv)
         self._worker.response_ready.connect(self._on_response)
@@ -517,8 +521,7 @@ class VoiceWindow(QMainWindow):
         self._worker.start()
 
     def _on_response(self, text: str):
-        if self._closing:
-            return
+        if self._closing: return
         self._set_thinking(False)
         self.transcript_lbl.setText("")
         self._set_status("SPEAKING")
@@ -526,7 +529,6 @@ class VoiceWindow(QMainWindow):
         if self._tts is not None:
             self._tts.speak(text)
         else:
-            # TTS non disponibile: torna subito in ascolto
             QTimer.singleShot(100, self._on_tts_done)
 
     def _on_tts_done(self):
@@ -546,12 +548,13 @@ class VoiceWindow(QMainWindow):
         self.transcript_lbl.setText(err[:60])
         QTimer.singleShot(3000, self._listen)
 
-    # ── Settings ──────────────────────────────────────────────────────────────
+    # ── Settings ────────────────────────────────────────────────────────────
 
     def _settings(self):
         self._busy = True
         if self._listener:
-            self._listener.stop()
+            try: self._listener.stop()
+            except Exception: pass
         d = VoiceSettingsDialog(self, cur_in=self._mic_in, cur_out=self._mic_out)
         if d.exec() == QDialog.DialogCode.Accepted:
             self._mic_in  = d.get_input()
@@ -569,7 +572,8 @@ class VoiceWindow(QMainWindow):
                     except Exception as e:
                         print(f"[RAZE] set_model error: {e}")
             if self._mic_monitor is not None:
-                self._mic_monitor.stop_monitoring()
+                try: self._mic_monitor.stop_monitoring()
+                except Exception: pass
             try:
                 self._mic_monitor = MicMonitor(device_index=self._mic_in)
                 self._mic_monitor.level_updated.connect(self._on_mic_level)
@@ -580,16 +584,17 @@ class VoiceWindow(QMainWindow):
         self._busy = False
         QTimer.singleShot(400, self._listen)
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ── Helpers ────────────────────────────────────────────────────────────
 
     def _set_status(self, text: str):
-        self.status_lbl.setText(f"[ {text} ]")
-        self._statusbar.set_status(text)
+        if hasattr(self, 'status_lbl'):
+            self.status_lbl.setText(f"[ {text} ]")
+        if hasattr(self, '_statusbar'):
+            self._statusbar.set_status(text)
 
     def _blink(self):
-        if self._closing:
-            return
-        if "LISTENING" in self.status_lbl.text():
+        if self._closing: return
+        if hasattr(self, 'status_lbl') and "LISTENING" in self.status_lbl.text():
             self._blink_state = not self._blink_state
             sym = "LISTENING" if self._blink_state else "_ _ _ _ _ _"
             self.status_lbl.setText(f"[ {sym} ]")
