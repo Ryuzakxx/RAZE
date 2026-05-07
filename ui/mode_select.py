@@ -6,17 +6,20 @@ import os
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QSizePolicy,
+    QPushButton, QComboBox, QGraphicsDropShadowEffect,
 )
-from PyQt6.QtCore    import Qt, pyqtSignal, QUrl, QTimer
+from PyQt6.QtCore    import (
+    Qt, pyqtSignal, QUrl, QTimer,
+    QPropertyAnimation, QEasingCurve, pyqtProperty,
+)
 from PyQt6.QtMultimedia        import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
-from PyQt6.QtGui   import QFontDatabase, QPixmap
+from PyQt6.QtGui   import QFontDatabase, QPixmap, QColor
 
 from ui.theme import get, set_theme, THEMES
 
 
-# ── Font registration ─────────────────────────────────────────────────────────────
+# ── Font registration ──────────────────────────────────────────────────────
 
 def _register_fonts():
     base = os.path.normpath(
@@ -33,90 +36,84 @@ def _register_fonts():
             QFontDatabase.addApplicationFont(p)
 
 _register_fonts()
-_FF = "'Space Mono','Courier New',monospace"
-_ASSETS = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
+_FF      = "'Space Mono','Courier New',monospace"
+_ASSETS  = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
 
 
 def _make_ss(C: dict) -> str:
     return f"""
-* {{ background-color: {C['bg']}; color: {C['mid']};
-     font-family: {_FF}; font-size: 12px; border: none; }}
-QLabel {{ color: {C['mid']}; background: transparent; border: none; }}
-
-/* ─ Mode card buttons ─ */
-QPushButton#mode_btn {{
-    background: transparent;
-    border: 1px solid {C['border']};
-    padding: 14px 10px 10px 10px;
-    min-width: 200px;
-    min-height: 110px;
-}}
-QPushButton#mode_btn:hover {{
-    border-color: {C['hi']};
-    background: transparent;
-}}
+* {{ background-color:{C['bg']}; color:{C['mid']};
+     font-family:{_FF}; font-size:12px; border:none; }}
+QLabel {{ color:{C['mid']}; background:transparent; border:none; }}
 
 /* ─ Theme combobox ─ */
 QComboBox#theme_combo {{
-    background: {C['bg1']};
-    color: {C['mid']};
-    border: 1px solid {C['border']};
-    padding: 4px 10px;
-    font-family: {_FF};
-    font-size: 9px;
-    letter-spacing: 2px;
-    min-width: 110px;
-    border-radius: 0;
+    background:{C['bg1']}; color:{C['mid']};
+    border:1px solid {C['border']};
+    padding:4px 10px;
+    font-family:{_FF}; font-size:9px; letter-spacing:2px;
+    min-width:110px; border-radius:0;
 }}
-QComboBox#theme_combo:hover {{ border-color: {C['hi']}; color: {C['hi']}; }}
-QComboBox#theme_combo::drop-down {{ border: none; width: 20px; }}
+QComboBox#theme_combo:hover {{ border-color:{C['hi']}; color:{C['hi']}; }}
+QComboBox#theme_combo::drop-down {{ border:none; width:20px; }}
 QComboBox#theme_combo::down-arrow {{
-    image: none;
-    width: 0; height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {C['mid']};
+    image:none; width:0; height:0;
+    border-left:4px solid transparent;
+    border-right:4px solid transparent;
+    border-top:5px solid {C['mid']};
 }}
 QComboBox#theme_combo QAbstractItemView {{
-    background: {C['bg1']};
-    color: {C['mid']};
-    selection-background-color: {C['hi']};
-    selection-color: {C['bg']};
-    border: 1px solid {C['border']};
-    font-family: {_FF};
-    font-size: 9px;
-    letter-spacing: 2px;
+    background:{C['bg1']}; color:{C['mid']};
+    selection-background-color:{C['hi']}; selection-color:{C['bg']};
+    border:1px solid {C['border']};
+    font-family:{_FF}; font-size:9px; letter-spacing:2px;
 }}
 """
 
 
-# ── Mode card widget ────────────────────────────────────────────────────────────────
+# ── ModeCard ───────────────────────────────────────────────────────────────────
 
 class ModeCard(QWidget):
-    """Card selezionabile: icona + testo typewriter al hover."""
+    """Card con bordo visibile, glow al hover e typewriter."""
 
     clicked = pyqtSignal()
 
-    def __init__(self, mode: str, icon_file: str, typewriter_text: str, C: dict):
+    # pyqtProperty per animare il raggio del drop-shadow
+    def _get_glow(self): return self._glow_r
+    def _set_glow(self, v):
+        self._glow_r = v
+        if self._shadow:
+            self._shadow.setBlurRadius(v)
+
+    glowRadius = pyqtProperty(float, fget=_get_glow, fset=_set_glow)
+
+    def __init__(self, mode: str, icon_file: str, tw_text: str, C: dict):
         super().__init__()
-        self._mode  = mode
-        self._tw_full  = typewriter_text      # testo da scrivere
+        self._mode     = mode
+        self._tw_full  = tw_text
         self._tw_pos   = 0
         self._tw_timer = QTimer(self)
         self._tw_timer.timeout.connect(self._tick)
-        self._C = C
+        self._C        = C
+        self._glow_r   = 0.0
+        self._shadow   = None
+        self._anim_in  = None
+        self._anim_out = None
 
-        self.setFixedSize(220, 130)
+        self.setFixedSize(220, 140)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._build(icon_file, C)
+        self._setup_shadow(C)
+        self._setup_animations(C)
 
+    # ─ Build
     def _build(self, icon_file: str, C: dict):
+        self._apply_border(C, hovered=False)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 14, 12, 10)
-        lay.setSpacing(8)
+        lay.setContentsMargins(12, 16, 12, 12)
+        lay.setSpacing(10)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # ─ Icona PNG
         self._icon_lbl = QLabel()
         self._icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon_lbl.setStyleSheet("background:transparent; border:none;")
@@ -129,28 +126,54 @@ class ModeCard(QWidget):
             )
             self._icon_lbl.setPixmap(px)
         else:
-            # fallback testo se il file non c'è
             self._icon_lbl.setText("A" if self._mode == "text" else "🎤")
             self._icon_lbl.setStyleSheet(
                 f"color:{C['hi']}; font-size:28px; background:transparent; border:none;"
             )
         lay.addWidget(self._icon_lbl)
 
-        # ─ Testo typewriter
         self._tw_lbl = QLabel("")
         self._tw_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._tw_lbl.setStyleSheet(
-            f"color:{C['hi']}; font-family:{_FF}; font-size:9px;"
-            f" letter-spacing:1px; background:transparent; border:none;"
-        )
+        self._apply_tw_style(C)
         lay.addWidget(self._tw_lbl)
 
-    def update_theme(self, C: dict):
-        self._C = C
+    def _apply_border(self, C: dict, hovered: bool):
+        border_color = C['hi'] if hovered else C['border']
+        bg_color     = C.get('bg1', C['bg']) if hovered else C['bg']
+        self.setStyleSheet(
+            f"ModeCard {{"
+            f"  background:{bg_color};"
+            f"  border:1px solid {border_color};"
+            f"}}"
+        )
+
+    def _apply_tw_style(self, C: dict):
         self._tw_lbl.setStyleSheet(
             f"color:{C['hi']}; font-family:{_FF}; font-size:9px;"
             f" letter-spacing:1px; background:transparent; border:none;"
         )
+
+    # ─ Drop-shadow glow
+    def _setup_shadow(self, C: dict):
+        hi = QColor(C['hi'])
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setColor(hi)
+        self._shadow.setOffset(0, 0)
+        self._shadow.setBlurRadius(0)
+        self.setGraphicsEffect(self._shadow)
+
+    def _setup_animations(self, C: dict):
+        self._anim_in = QPropertyAnimation(self, b"glowRadius", self)
+        self._anim_in.setDuration(220)
+        self._anim_in.setStartValue(0.0)
+        self._anim_in.setEndValue(22.0)
+        self._anim_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._anim_out = QPropertyAnimation(self, b"glowRadius", self)
+        self._anim_out.setDuration(300)
+        self._anim_out.setStartValue(22.0)
+        self._anim_out.setEndValue(0.0)
+        self._anim_out.setEasingCurve(QEasingCurve.Type.InCubic)
 
     # ─ Typewriter
     def _start_typewriter(self):
@@ -170,12 +193,32 @@ class ModeCard(QWidget):
             self._tw_timer.stop()
             self._tw_lbl.setText(self._tw_full + "▁")
 
+    # ─ Theme update
+    def update_theme(self, C: dict):
+        self._C = C
+        self._apply_border(C, hovered=False)
+        self._apply_tw_style(C)
+        if self._shadow:
+            self._shadow.setColor(QColor(C['hi']))
+        if self._anim_in:
+            self._anim_in.setEndValue(22.0)
+        if self._anim_out:
+            self._anim_out.setStartValue(22.0)
+
     # ─ Events
     def enterEvent(self, e):
+        if self._anim_out: self._anim_out.stop()
+        self._anim_in.setStartValue(self._glow_r)
+        self._anim_in.start()
+        self._apply_border(self._C, hovered=True)
         self._start_typewriter()
         super().enterEvent(e)
 
     def leaveEvent(self, e):
+        if self._anim_in: self._anim_in.stop()
+        self._anim_out.setStartValue(self._glow_r)
+        self._anim_out.start()
+        self._apply_border(self._C, hovered=False)
         self._stop_typewriter()
         super().leaveEvent(e)
 
@@ -184,7 +227,7 @@ class ModeCard(QWidget):
             self.clicked.emit()
 
 
-# ── ModeSelectWindow ───────────────────────────────────────────────────────────────────
+# ── ModeSelectWindow ──────────────────────────────────────────────────────────────
 
 class ModeSelectWindow(QWidget):
     mode_selected = pyqtSignal(str)
@@ -214,7 +257,6 @@ class ModeSelectWindow(QWidget):
         lay.addLayout(self._make_mode_row(C))
         lay.addStretch()
 
-    # ─ Title bar
     def _make_titlebar(self, C) -> QWidget:
         bar = QWidget()
         bar.setFixedHeight(32)
@@ -241,7 +283,6 @@ class ModeSelectWindow(QWidget):
         bl.addWidget(cb)
         return bar
 
-    # ─ Video cell
     def _make_video_cell(self, C) -> QWidget:
         vid_wrap = QWidget()
         vid_wrap.setFixedHeight(190)
@@ -263,25 +304,22 @@ class ModeSelectWindow(QWidget):
         self.vid_ph.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.vid_ph.setStyleSheet(
             f"color:{C['dim']}; font-size:11px; background:transparent;"
-            f" font-family:{_FF}; letter-spacing:1px; line-height:1.4;"
+            f" font-family:{_FF}; letter-spacing:1px;"
         )
         self.vid_ph.hide()
         vl.addWidget(self.vid_ph)
         return vid_wrap
 
-    # ─ Theme row: label + combobox
     def _make_theme_row(self, C) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setContentsMargins(40, 14, 40, 0)
         row.setSpacing(10)
-
         lbl = QLabel("THEME //")
         lbl.setStyleSheet(
             f"color:{C['dim']}; font-size:9px; letter-spacing:2px;"
             f" background:transparent; border:none;"
         )
         row.addWidget(lbl)
-
         self._theme_combo = QComboBox()
         self._theme_combo.setObjectName("theme_combo")
         for name in THEMES:
@@ -296,7 +334,6 @@ class ModeSelectWindow(QWidget):
         row.addStretch()
         return row
 
-    # ─ Prompt label
     def _make_prompt_lbl(self, C) -> QLabel:
         prompt = QLabel("// SELECT_MODE")
         prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -306,13 +343,11 @@ class ModeSelectWindow(QWidget):
         )
         return prompt
 
-    # ─ Mode cards row
     def _make_mode_row(self, C) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setContentsMargins(40, 0, 40, 0)
-        row.setSpacing(24)
+        row.setSpacing(32)
         row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         self._mode_cards = []
         specs = [
             ("text",  "chat_icon.png",  "chat with RAZE via text_"),
@@ -323,10 +358,8 @@ class ModeSelectWindow(QWidget):
             card.clicked.connect(lambda m=mode: self._select(m))
             row.addWidget(card)
             self._mode_cards.append(card)
-
         return row
 
-    # ─ Theme switch
     def _set_theme(self, name: str):
         set_theme(name)
         C = get()
@@ -346,15 +379,12 @@ class ModeSelectWindow(QWidget):
             child.style().polish(child)
             child.update()
 
-    # ─ Video
     def _load_video(self):
         path = os.path.normpath(
             os.path.join(os.path.dirname(__file__), "..", "assets", "raze_white.mp4")
         )
         if not os.path.exists(path):
-            self.vid.hide()
-            self.vid_ph.show()
-            return
+            self.vid.hide(); self.vid_ph.show(); return
         try:
             self._player = QMediaPlayer(self)
             self._ao = QAudioOutput(self)
@@ -367,12 +397,10 @@ class ModeSelectWindow(QWidget):
         except Exception as e:
             print(f"[RAZE] Video error: {e}")
             self._player = None
-            self.vid.hide()
-            self.vid_ph.show()
+            self.vid.hide(); self.vid_ph.show()
 
     def _restart_video(self):
-        if self._player is None:
-            return
+        if self._player is None: return
         try:
             self._player.stop()
             self._player.setPosition(0)
@@ -381,16 +409,11 @@ class ModeSelectWindow(QWidget):
             print(f"[RAZE] Video restart error: {e}")
 
     def _on_media(self, s):
-        if self._player is None:
-            return
+        if self._player is None: return
         if s == QMediaPlayer.MediaStatus.EndOfMedia:
-            try:
-                self._player.setPosition(0)
-                self._player.play()
-            except Exception:
-                pass
+            try: self._player.setPosition(0); self._player.play()
+            except Exception: pass
 
-    # ─ Select
     def _select(self, mode: str):
         if self._player is not None:
             try: self._player.stop()
@@ -398,7 +421,6 @@ class ModeSelectWindow(QWidget):
         self.mode_selected.emit(mode)
         self.close()
 
-    # ─ Drag
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = e.globalPosition().toPoint()
