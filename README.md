@@ -7,9 +7,9 @@
 ██╔══██╗██╔══██║ ███╔╝  ██╔══╝  
 ██║  ██║██║  ██║███████╗███████╗
 ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
-
-![alt text](https://i1-c.pinimg.com/736x/eb/a0/a1/eba0a168e0244c6a850d202349045df4.jpg)
 ```
+
+![RAZE preview](https://i1-c.pinimg.com/736x/eb/a0/a1/eba0a168e0244c6a850d202349045df4.jpg)
 
 **AI assistant · voice & text · offline-first**
 
