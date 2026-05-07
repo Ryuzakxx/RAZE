@@ -6,3 +6,4 @@ openai-whisper>=20231117
 soundfile>=0.12.1
 pyttsx3>=2.90
 psutil>=5.9.0
+faster-whisper>=1.0.0

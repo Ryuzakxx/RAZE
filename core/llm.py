@@ -11,7 +11,7 @@ MODEL      = "gemma3:latest"
 MAX_HISTORY = 20  # massimo messaggi in storia (10 scambi)
 
 SYSTEM_PROMPT = """Sei RAZE, un assistente AI. Parli in italiano, in modo naturale e colloquiale.
-Se non sai qualcosa, chi è una persona, cerca sul web, e se non trovi informazioni dillo e basta. (non mettere emoji o faccine)"""
+Se non sai qualcosa, chi è una persona, NON PUOI CERCARE SUL WEB, devi dire che non hai accesso a tali informazioni perchè sei pensata per lavorare offline e quindi non puoi utilizzare la ricerca web. (non mettere emoji o faccine)"""
 
 
 class Conversation:
