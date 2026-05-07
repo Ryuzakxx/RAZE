@@ -9,7 +9,7 @@
 ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
 ```
 
-![RAZE preview](https://i1-c.pinimg.com/1200x/3e/66/1f/3e661fdda7bc053d91d1bcebfb0b2cd5.jpg)
+![RAZE preview](https://i1-c.pinimg.com/1200x/be/ca/cc/becaccb5827ceba2a41639fc81d5df6a.jpg)
 
 **AI assistant · voice & text · offline-first**
 
