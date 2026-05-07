@@ -19,7 +19,7 @@ from PyQt6.QtGui   import QFontDatabase, QPixmap, QColor
 from ui.theme import get, set_theme, THEMES
 
 
-# ── Font registration ──────────────────────────────────────────────────────
+# ── Font registration ─────────────────────────────────────────────────────
 
 def _register_fonts():
     base = os.path.normpath(
@@ -71,14 +71,13 @@ QComboBox#theme_combo QAbstractItemView {{
 """
 
 
-# ── ModeCard ───────────────────────────────────────────────────────────────────
+# ── ModeCard ──────────────────────────────────────────────────────────────────
 
 class ModeCard(QWidget):
     """Card con bordo visibile, glow al hover e typewriter."""
 
     clicked = pyqtSignal()
 
-    # pyqtProperty per animare il raggio del drop-shadow
     def _get_glow(self): return self._glow_r
     def _set_glow(self, v):
         self._glow_r = v
@@ -89,6 +88,9 @@ class ModeCard(QWidget):
 
     def __init__(self, mode: str, icon_file: str, tw_text: str, C: dict):
         super().__init__()
+        # *** FIX: abilita il paint del background/bordo da stylesheet ***
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
         self._mode     = mode
         self._tw_full  = tw_text
         self._tw_pos   = 0
@@ -104,9 +106,9 @@ class ModeCard(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._build(icon_file, C)
         self._setup_shadow(C)
-        self._setup_animations(C)
+        self._setup_animations()
 
-    # ─ Build
+    # ─ Build UI
     def _build(self, icon_file: str, C: dict):
         self._apply_border(C, hovered=False)
         lay = QVBoxLayout(self)
@@ -138,12 +140,13 @@ class ModeCard(QWidget):
         lay.addWidget(self._tw_lbl)
 
     def _apply_border(self, C: dict, hovered: bool):
-        border_color = C['hi'] if hovered else C['border']
+        border_color = C['hi']               if hovered else C['border']
         bg_color     = C.get('bg1', C['bg']) if hovered else C['bg']
+        # Usa il nome della classe come selettore — funziona con WA_StyledBackground
         self.setStyleSheet(
             f"ModeCard {{"
-            f"  background:{bg_color};"
-            f"  border:1px solid {border_color};"
+            f" background:{bg_color};"
+            f" border:1px solid {border_color};"
             f"}}"
         )
 
@@ -155,14 +158,13 @@ class ModeCard(QWidget):
 
     # ─ Drop-shadow glow
     def _setup_shadow(self, C: dict):
-        hi = QColor(C['hi'])
         self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setColor(hi)
+        self._shadow.setColor(QColor(C['hi']))
         self._shadow.setOffset(0, 0)
         self._shadow.setBlurRadius(0)
         self.setGraphicsEffect(self._shadow)
 
-    def _setup_animations(self, C: dict):
+    def _setup_animations(self):
         self._anim_in = QPropertyAnimation(self, b"glowRadius", self)
         self._anim_in.setDuration(220)
         self._anim_in.setStartValue(0.0)
@@ -200,10 +202,6 @@ class ModeCard(QWidget):
         self._apply_tw_style(C)
         if self._shadow:
             self._shadow.setColor(QColor(C['hi']))
-        if self._anim_in:
-            self._anim_in.setEndValue(22.0)
-        if self._anim_out:
-            self._anim_out.setStartValue(22.0)
 
     # ─ Events
     def enterEvent(self, e):
@@ -227,7 +225,7 @@ class ModeCard(QWidget):
             self.clicked.emit()
 
 
-# ── ModeSelectWindow ──────────────────────────────────────────────────────────────
+# ── ModeSelectWindow ────────────────────────────────────────────────────────────
 
 class ModeSelectWindow(QWidget):
     mode_selected = pyqtSignal(str)
