@@ -24,7 +24,7 @@
 
 ## `> OVERVIEW`
 
-RAZE è un assistente AI con interfaccia terminale sci-fi, pensato per girare **completamente offline**.  
+RAZE è un assistente AI con interfaccia terminale sci-fi, pensato per **essere il tuo agente di compagnia**.  
 Supporta sia modalità testuale che vocale, con riconoscimento vocale locale via Faster-Whisper e sintesi TTS.
 
 ---
