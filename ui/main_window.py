@@ -43,19 +43,19 @@ def _mono(px=12, bold=False):
 def _ss(C):
     return f"""
 QWidget {{ background:{C['bg']}; color:{C['text']}; font-family:{_FF}; font-size:12px; border:none; outline:none; }}
-QFrame#cell {{ background:{C['bg1']}; border:1px solid {C['border']}; border-radius:6px; }}
+QFrame#cell {{ background:{C['bg1']}; border:1px solid {C['border']}; border-radius:0px; }}
 QTextEdit#log {{ background:{C['bg']}; color:{C['text']}; font-family:{_FF}; font-size:12px; padding:16px; border:none; selection-background-color:{C['hi']}; selection-color:{C['bg']}; }}
 QLineEdit#inp {{ background:transparent; color:{C['text']}; font-family:{_FF}; font-size:13px; padding:12px 14px; border:none; }}
 QLineEdit#inp:focus {{ color:{C['hi2']}; }}
-QPushButton#tbtn {{ background:transparent; color:{C['mid']}; font-family:{_FF}; font-size:9px; letter-spacing:1px; padding:2px 8px; border:1px solid {C['border']}; border-radius:4px; }}
-QPushButton#tbtn:hover {{ color:{C['text']}; border-color:{C['mid']}; }}
+QPushButton#tbtn {{ background:transparent; color:{C['mid']}; font-family:{_FF}; font-size:9px; letter-spacing:1px; padding:2px 8px; border:1px solid {C['border']}; border-radius:0px; }}
+QPushButton#tbtn:hover {{ color:{C['text']}; border-color:{C['hi2']}; }}
 QPushButton#send {{ background:transparent; color:{C['hi']}; font-family:{_FF}; font-size:10px; letter-spacing:3px; padding:12px 24px; border-left:1px solid {C['border']}; border-radius:0; }}
 QPushButton#send:hover {{ background:{C['hi']}; color:{C['bg']}; }}
 QPushButton#send:pressed {{ background:{C['hi2']}; color:{C['bg']}; }}
-QPushButton#back {{ background:transparent; color:{C['dim']}; font-family:{_FF}; font-size:9px; letter-spacing:2px; padding:2px 10px; border:1px solid {C['border']}; border-radius:4px; }}
+QPushButton#back {{ background:transparent; color:{C['dim']}; font-family:{_FF}; font-size:9px; letter-spacing:2px; padding:2px 10px; border:1px solid {C['border']}; border-radius:0px; }}
 QPushButton#back:hover {{ color:{C['mid']}; border-color:{C['mid']}; }}
-QScrollBar:vertical {{ background:{C['bg']}; width:4px; margin:0; border-radius:2px; }}
-QScrollBar::handle:vertical {{ background:{C['dim']}; min-height:20px; border-radius:2px; }}
+QScrollBar:vertical {{ background:{C['bg']}; width:4px; margin:0; border-radius:0px; }}
+QScrollBar::handle:vertical {{ background:{C['dim']}; min-height:20px; border-radius:0px; }}
 QScrollBar::handle:vertical:hover {{ background:{C['hi']}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
 """

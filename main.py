@@ -40,7 +40,7 @@ def main():
         if mode == "text":
             from ui.main_window import RazeWindow
             w = RazeWindow()
-            w.back_requested.connect(show_selector)   # ← torna al menu
+            w.back_requested.connect(show_selector) 
             _wins["main"] = w
             w.show()
         elif mode == "voice":
@@ -52,7 +52,7 @@ def main():
 
     from ui.boot_screen import BootScreen
     boot = BootScreen(get())
-    boot.boot_finished.connect(show_selector)
+    boot.boot_finished.connect(lambda: on_mode("voice"))
     _wins["boot"] = boot
     boot.show()
 

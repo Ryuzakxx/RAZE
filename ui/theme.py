@@ -1,20 +1,20 @@
 """
 ui/theme.py  –  RAZE palette fissa
-Sfondo nero #000000, accent viola #320096.
+Palette globale usata per tutte le finestre.
 """
 
 _C = {
-    "bg":     "#000000",
-    "bg1":    "#0a0a0a",
-    "bg2":    "#111111",
-    "border": "#2a0060",
-    "hi":     "#320096",
-    "hi2":    "#5500cc",
-    "mid":    "#cccccc",
-    "dim":    "#555555",
-    "text":   "#eeeeee",
-    "glow":   "50,0,150",
-    "name":   "default",   # stub: evita KeyError nei file che usano C['name']
+    "bg":     "#100A1C",
+    "bg1":    "#080013",
+    "bg2":    "#080411",
+    "border": "#34006E",
+    "hi":     "#A366FF",
+    "hi2":    "#CFA0FF",
+    "mid":    "#9C7AD2",
+    "dim":    "#7F6B9A",
+    "text":   "#EAE4FF",
+    "glow":   "163,102,255",
+    "name":   "default",
 }
 
 def get() -> dict:

@@ -195,18 +195,9 @@ class VoiceWindow(QMainWindow):
         vc.resizeEvent = _r
         vl.addWidget(vc, stretch=1)
 
-        # Waveform bar
-        wf = QWidget(); wf.setFixedHeight(32)
-        wf.setStyleSheet(f"background:{C['bg1']}; border-top:1px solid {C['border']};")
-        wfl = QHBoxLayout(wf); wfl.setContentsMargins(12,4,12,4)
-        wl = QLabel("◈ "); wl.setStyleSheet(f"color:{C['hi']}; font-size:10px; background:transparent; border:none;")
-        wfl.addWidget(wl)
-        self._wf = WaveformWidget(C, cols=38); wfl.addWidget(self._wf)
-        vl.addWidget(wf)
-
         # Status panel
         sp = QWidget(); sp.setFixedHeight(80)
-        sp.setStyleSheet(f"background:{C['bg1']}; border-top:1px solid {C['border']};")
+        sp.setStyleSheet(f"background:{C['bg']}; border-top:none;")
         spl = QVBoxLayout(sp); spl.setContentsMargins(20,12,20,12); spl.setSpacing(6)
 
         self.status_lbl = QLabel("[ LOADING ]")
@@ -219,12 +210,6 @@ class VoiceWindow(QMainWindow):
         self.transcript_lbl.setStyleSheet(f"color:{C['mid']}; font-size:10px; background:transparent; border:none;")
         spl.addWidget(self.transcript_lbl)
 
-        mic_row = QHBoxLayout(); mic_row.setContentsMargins(0,0,0,0)
-        ml = QLabel("MIC  "); ml.setStyleSheet(f"color:{C['dim']}; font-size:9px; background:transparent; border:none;")
-        mic_row.addWidget(ml)
-        self._mic_bar = MicLevelBar(C, width=22)
-        mic_row.addWidget(self._mic_bar); mic_row.addStretch()
-        spl.addLayout(mic_row)
         vl.addWidget(sp)
 
         self._sb = StatusBar(C); vl.addWidget(self._sb)
@@ -262,7 +247,7 @@ class VoiceWindow(QMainWindow):
 
     def _load_video(self):
         base = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets"))
-        self._vid_idle     = os.path.join(base, "raze_white.mp4")
+        self._vid_idle     = os.path.join(base, "raze_purple.mp4")
         self._vid_thinking = os.path.join(base, "loading.mp4")
         if not os.path.exists(self._vid_idle):
             self.vid.hide(); self.vid_ph.show(); self.vid_ph.setText("[ NO VIDEO ]"); return
@@ -292,7 +277,7 @@ class VoiceWindow(QMainWindow):
         self._play(self._vid_thinking if on else self._vid_idle)
 
     def _on_mic_level(self, lv):
-        self._mic_bar.set_level(lv); self._wf.push_level(lv)
+        if hasattr(self, '_wf'): self._wf.push_level(lv)
 
     def _on_model_ready(self):
         if self._closing: return
