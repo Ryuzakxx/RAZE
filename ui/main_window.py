@@ -1,6 +1,6 @@
 """
 ui/main_window.py - RAZE Text Mode
-Stile Oxide/Warp: sfondo #0d1117, celle con border, accent arancione sparso
+Palette fissa: bg nero #000000, accent viola #320096.
 """
 
 import os
@@ -184,7 +184,6 @@ class RazeWindow(QMainWindow):
         bar.setStyleSheet(f"background:{self.C['bg1']}; border-bottom:1px solid {self.C['border']};")
         hl = QHBoxLayout(bar); hl.setContentsMargins(16,0,8,0); hl.setSpacing(0)
 
-        # Traffic light dots (decorativi)
         for c in ["#ff5f57","#febc2e","#28c840"]:
             d = QLabel("●"); d.setFixedSize(14,14)
             d.setStyleSheet(f"color:{c}; font-size:9px; background:transparent; border:none;")
@@ -196,11 +195,10 @@ class RazeWindow(QMainWindow):
         hl.addWidget(title)
         hl.addSpacing(8)
 
-        # Tab attivo stile Oxide
         tab = QWidget(); tab.setFixedHeight(38)
         tab.setStyleSheet(f"background:{self.C['bg']}; border-left:1px solid {self.C['border']}; border-right:1px solid {self.C['border']}; border-bottom:2px solid {self.C['hi']};")
         tl = QHBoxLayout(tab); tl.setContentsMargins(16,0,16,0)
-        tl.addWidget(QLabel("TEXT_MODE") if False else self._tab_lbl("TEXT_MODE"))
+        tl.addWidget(self._tab_lbl("TEXT_MODE"))
         hl.addWidget(tab)
         hl.addStretch()
 
@@ -209,7 +207,7 @@ class RazeWindow(QMainWindow):
         hl.addWidget(self._status_lbl)
         hl.addSpacing(20)
 
-        back = QPushButton("◀ MODE"); back.setObjectName("back"); back.setFixedHeight(24)
+        back = QPushButton("◄ MODE"); back.setObjectName("back"); back.setFixedHeight(24)
         back.clicked.connect(self._go_back); hl.addWidget(back); hl.addSpacing(8)
 
         for sym, slot in [("—", self.showMinimized),("□",self._toggle_max),("×",self.close)]:
@@ -227,7 +225,6 @@ class RazeWindow(QMainWindow):
         w = QWidget(); w.setStyleSheet("background:transparent; border:none;")
         vl = QVBoxLayout(w); vl.setContentsMargins(0,0,0,0); vl.setSpacing(8)
 
-        # Video cell
         vid_cell = QFrame(); vid_cell.setObjectName("cell")
         vcl = QVBoxLayout(vid_cell); vcl.setContentsMargins(0,0,0,0); vcl.setSpacing(0)
         vcl.addWidget(self._cell_hdr("VISUAL_OUTPUT"))
@@ -242,14 +239,14 @@ class RazeWindow(QMainWindow):
         vcl.addWidget(vc, stretch=1)
         vl.addWidget(vid_cell, stretch=3)
 
-        # Stats cell
         stats_cell = QFrame(); stats_cell.setObjectName("cell")
         scl = QVBoxLayout(stats_cell); scl.setContentsMargins(0,0,0,0); scl.setSpacing(0)
         scl.addWidget(self._cell_hdr("SYSTEM_STATS"))
-        sc = QWidget(); sc.setStyleSheet(f"background:transparent; border:none;")
+        sc = QWidget(); sc.setStyleSheet("background:transparent; border:none;")
         sl = QVBoxLayout(sc); sl.setContentsMargins(16,12,16,12); sl.setSpacing(8)
         self._sys_vals = {}
-        rows = [("STATUS","STANDBY"),("THEME",self.C["name"].upper()),("MSGS","0"),("CPU","—"),("RAM","—"),("TIME","—")]
+        # rimosso THEME dalle righe: non esiste più C['name'] dinamico
+        rows = [("STATUS","STANDBY"),("MSGS","0"),("CPU","—"),("RAM","—"),("TIME","—")]
         for k,v in rows:
             row = QHBoxLayout(); row.setSpacing(0)
             kl = QLabel(k)
@@ -275,12 +272,10 @@ class RazeWindow(QMainWindow):
         self.log.setReadOnly(True); self.log.setFont(_mono(12))
         vl.addWidget(self.log, stretch=1)
 
-        # Divider
         div = QWidget(); div.setFixedHeight(1)
         div.setStyleSheet(f"background:{self.C['border']};")
         vl.addWidget(div)
 
-        # Input row — stile Oxide con → prefix
         inp_row = QWidget(); inp_row.setFixedHeight(48)
         inp_row.setStyleSheet(f"background:{self.C['bg1']}; border:none;")
         ir = QHBoxLayout(inp_row); ir.setContentsMargins(0,0,0,0); ir.setSpacing(0)
@@ -386,7 +381,7 @@ class RazeWindow(QMainWindow):
     def _upd_sys(self):
         if self._closing: return
         self._set_val("TIME", datetime.datetime.now().strftime("%H:%M:%S"))
-        self._set_val("THEME", self.C["name"].upper())
+        # niente più THEME row: rimosso C['name']
         if _psutil:
             try:
                 self._set_val("CPU", f"{_psutil.cpu_percent(interval=None):.0f}%")
