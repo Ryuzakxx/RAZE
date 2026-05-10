@@ -1,38 +1,45 @@
 """
 core/llm.py
-Gestisce la comunicazione con Ollama usando l'API /chat
-che supporta la storia della conversazione nativa.
+Gestisce la comunicazione con Ollama.
+Supporta comandi file system via [FS:cmd] nella risposta dell'AI.
 """
 
 import requests
-import os
-import shutil
-from pathlib import Path
-from duckduckgo_search import DDGS
+from core.fs_tools import execute_fs_commands
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "gemma3:latest"
+OLLAMA_URL  = "http://localhost:11434/api/chat"
+MODEL       = "gemma3:latest"
 MAX_HISTORY = 20
-SYSTEM_PROMPT = """Sei RAZE, un assistente AI avanzato. Parli in italiano, in modo naturale e colloquiale.
-Hai capacità di agente: puoi cercare informazioni sul web e manipolare file e cartelle nel sistema.
-Quando l'utente ti chiede di fare qualcosa che richiede queste capacità, rispondi usando un formato speciale per le "tool call":
 
-Per cercare sul web: [WEB_SEARCH: query]
-Per leggere un file: [READ_FILE: path]
-Per scrivere/modificare un file: [WRITE_FILE: path | content]
-Per creare una cartella: [MKDIR: path]
-Per eliminare un file/cartella: [DELETE: path]
-Per elencare i file in una cartella: [LIST_DIR: path]
+SYSTEM_PROMPT = """Sei RAZE, un assistente AI. Parli in italiano, in modo naturale e colloquiale.
+Se non sai qualcosa, chi è una persona, NON PUOI CERCARE SUL WEB, devi dire che non hai accesso
+a tali informazioni perché sei pensata per lavorare offline.
+(non mettere emoji o faccine)
 
-Dopo aver ricevuto il risultato della tool call, integra l'informazione nella tua risposta finale.
-Non usare emoji o faccine."""
+Puoi eseguire operazioni sul file system dell'utente.
+Quando devi farlo, scrivi il comando su una riga separata PRIMA del testo di risposta:
+
+  [FS:delete] percorso       → elimina file o cartella
+  [FS:list]   percorso       → elenca contenuto cartella
+  [FS:mkdir]  percorso       → crea cartella
+  [FS:move]   src -> dst     → sposta file/cartella
+  [FS:info]   percorso       → info su file/cartella
+
+Esempi di percorsi accettati:
+  download, downloads, scaricati  → cartella Downloads utente
+  desktop, scrivania              → Desktop utente
+  documenti, documents            → Documenti utente
+  C:\\Users\\pippo\\file.txt       → percorso assoluto Windows
+
+NON usare percorsi relativi alla directory del progetto.
+Se l'utente dice "elimina la cartella download" scrivi:
+  [FS:delete] download
+Se l'utente dice "elenca il desktop" scrivi:
+  [FS:list] desktop
+"""
 
 
 class Conversation:
-    """
-    Mantiene la storia della conversazione.
-    Usane una per sessione (testo o voce).
-    """
     def __init__(self):
         self._history: list[dict] = []
 
@@ -45,7 +52,6 @@ class Conversation:
         self._trim()
 
     def _trim(self):
-        """Mantiene solo gli ultimi MAX_HISTORY messaggi."""
         if len(self._history) > MAX_HISTORY:
             self._history = self._history[-MAX_HISTORY:]
 
@@ -58,8 +64,8 @@ class Conversation:
 
 def query_raze(user_input: str, conversation: Conversation = None) -> str:
     """
-    Manda un messaggio a Ollama con la storia completa della conversazione.
-    Gestisce le tool call per web search e file system.
+    Invia il messaggio a Ollama, esegue eventuali comandi FS nella risposta
+    e restituisce il testo pulito + gli esiti delle operazioni.
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -69,132 +75,41 @@ def query_raze(user_input: str, conversation: Conversation = None) -> str:
     else:
         messages.append({"role": "user", "content": user_input})
 
-    def get_llm_response(msgs):
-        payload = {
-            "model":    MODEL,
-            "messages": msgs,
-            "stream":   False,
-            "options": {
-                "temperature": 0.7,
-                "top_p":       0.9,
-                "num_predict": 512,
-            }
+    payload = {
+        "model":    MODEL,
+        "messages": messages,
+        "stream":   False,
+        "options": {
+            "temperature": 0.7,
+            "top_p":       0.9,
+            "num_predict": 512,
         }
-        try:
-            r = requests.post(OLLAMA_URL, json=payload, timeout=60)
-            r.raise_for_status()
-            return r.json()["message"]["content"].strip()
-        except Exception as e:
-            raise RuntimeError(f"Errore Ollama: {e}")
+    }
 
-    max_iterations = 5
-    
-    for _ in range(max_iterations):
-        response_text = get_llm_response(messages)
-        
-        # Normalizzazione percorso
-        def normalize_path(p):
-            p = p.strip()
-            # Mappatura cartelle utente comuni
-            user_home = Path.home()
-            mappings = {
-                "download": user_home / "Downloads",
-                "downloads": user_home / "Downloads",
-                "documenti": user_home / "Documents",
-                "documents": user_home / "Documents",
-                "desktop": user_home / "Desktop",
-            }
-            for key, full_path in mappings.items():
-                if p.lower() == key:
-                    return str(full_path)
-            
-            # Se è un percorso relativo, lo rende assoluto rispetto alla root del progetto
-            if not os.path.isabs(p):
-                return str(Path(os.getcwd()) / p)
-            return p
+    try:
+        r = requests.post(OLLAMA_URL, json=payload, timeout=60)
+        r.raise_for_status()
+        raw_text = r.json()["message"]["content"].strip()
 
-        # Controllo tool call [TOOL: args]
-        if "[WEB_SEARCH:" in response_text:
-            query = response_text.split("[WEB_SEARCH:")[1].split("]")[0].strip()
-            with DDGS() as ddgs:
-                results = [r['body'] for r in ddgs.text(query, max_results=3)]
-                tool_result = "\n".join(results) if results else "Nessun risultato trovato."
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"[RESULT: {tool_result}]"})
-            continue
-            
-        elif "[READ_FILE:" in response_text:
-            path = response_text.split("[READ_FILE:")[1].split("]")[0].strip()
-            print(f"[DEBUG] Tentativo di lettura file: {path}")
-            try:
-                with open(path, 'r', encoding='utf-8') as f: tool_result = f.read()
-            except Exception as e: 
-                print(f"[DEBUG] Errore lettura file {path}: {e}")
-                tool_result = f"Errore lettura: {e}"
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"[RESULT: {tool_result}]"})
-            continue
-            
-        elif "[WRITE_FILE:" in response_text:
-            try:
-                parts = response_text.split("[WRITE_FILE:")[1].split("]")[0].split("|")
-                path, content = parts[0].strip(), parts[1].strip()
-                print(f"[DEBUG] Tentativo di scrittura file: {path}")
-                with open(path, 'w', encoding='utf-8') as f: f.write(content)
-                tool_result = "File scritto con successo."
-            except Exception as e: 
-                print(f"[DEBUG] Errore scrittura file {path}: {e}")
-                tool_result = f"Errore scrittura: {e}"
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"[RESULT: {tool_result}]"})
-            continue
-            
-        elif "[MKDIR:" in response_text:
-            path = response_text.split("[MKDIR:")[1].split("]")[0].strip()
-            print(f"[DEBUG] Tentativo di creazione cartella: {path}")
-            try:
-                os.makedirs(path, exist_ok=True)
-                tool_result = "Cartella creata con successo."
-            except Exception as e: 
-                print(f"[DEBUG] Errore creazione cartella {path}: {e}")
-                tool_result = f"Errore creazione cartella: {e}"
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"[RESULT: {tool_result}]"})
-            continue
-            
-        elif "[DELETE:" in response_text:
-            path = response_text.split("[DELETE:")[1].split("]")[0].strip()
-            print(f"[DEBUG] Tentativo di eliminazione: {path}")
-            try:
-                if os.path.isdir(path): shutil.rmtree(path)
-                else: os.remove(path)
-                tool_result = "Eliminato con successo."
-            except Exception as e: 
-                print(f"[DEBUG] Errore eliminazione {path}: {e}")
-                tool_result = f"Errore eliminazione: {e}"
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"[RESULT: {tool_result}]"})
-            continue
-            
-        elif "[LIST_DIR:" in response_text:
-            path = response_text.split("[LIST_DIR:")[1].split("]")[0].strip()
-            print(f"[DEBUG] Tentativo di listdir: {path}")
-            try:
-                tool_result = os.listdir(path)
-                tool_result = ", ".join(tool_result) if tool_result else "Cartella vuota."
-            except Exception as e: 
-                print(f"[DEBUG] Errore listdir {path}: {e}")
-                tool_result = f"Errore listdir: {e}"
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"[RESULT: {tool_result}]"})
-            continue
-            
-        break
+        # Esegui comandi FS presenti nella risposta
+        clean_text, fs_results = execute_fs_commands(raw_text)
 
-    if conversation:
-        conversation.add_assistant(response_text)
+        # Componi risposta finale: testo AI + esiti operazioni FS
+        final = clean_text
+        if fs_results:
+            final = (clean_text + "\n\n" + "\n".join(fs_results)).strip()
 
-    return response_text
+        if conversation:
+            conversation.add_assistant(final)
+
+        return final
+
+    except requests.exceptions.ConnectionError:
+        raise ConnectionError("Ollama non raggiungibile. Avvia: ollama serve")
+    except requests.exceptions.Timeout:
+        raise TimeoutError("Timeout Ollama.")
+    except requests.exceptions.HTTPError as e:
+        raise RuntimeError(f"Errore HTTP Ollama: {e}")
 
 
 def check_ollama_status() -> bool:
